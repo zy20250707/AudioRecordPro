@@ -1,0 +1,17 @@
+# Xcode/Swift build
+build/
+DerivedData/
+*.xcuserdatad
+*.xcworkspace/xcuserdata/
+.DS_Store
+*.log
+*.xcarchive
+# Swift Package Manager
+.swiftpm/
+.build/
+# Editor
+.idea/
+.vscode/
+# Archives
+*.zip
+*.tar.gz
