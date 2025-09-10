@@ -2,6 +2,12 @@
 
 一个基于 Swift 和 AppKit 开发的 macOS 音频录制应用程序，支持「麦克风」与「系统声音」两种录制模式。
 
+## 应用界面截图
+
+![主界面](assets/screenshot-main.png)
+
+将截图文件保存为 `assets/screenshot-main.png`（相对项目根目录），README 将自动显示。
+
 ## 核心系统 API
 
 ### 1. 音频录制 API
