@@ -1,191 +1,134 @@
 # AudioRecordMac - macOS 音频录制工具
 
-一个基于 Swift 和 AppKit 开发的 macOS 音频录制应用程序，支持麦克风和系统声音录制。
+一个基于 Swift 和 AppKit 开发的 macOS 音频录制应用程序，支持「麦克风」与「系统声音」两种录制模式。
 
 ## 核心系统 API
 
 ### 1. 音频录制 API
 
 #### AVAudioEngine
-- **用途**: 音频录制引擎核心
-- **主要组件**:
-  - `AVAudioEngine.inputNode`: 音频输入节点
-  - `AVAudioMixerNode`: 音频混音器节点
-  - `AVAudioPlayerNode`: 音频播放节点
+- 用途: 麦克风录制/播放链路核心
+- 主要组件:
+  - `AVAudioEngine.inputNode`: 麦克风输入节点
+  - `AVAudioMixerNode`: 混音节点（安装 tap 抓取 PCM）
+  - `AVAudioPlayerNode`: 播放节点（用于回放）
 
 #### AVAudioFile
-- **用途**: 音频文件写入
-- **支持格式**: M4A, MP3, WAV
-- **参数**:
-  ```swift
-  // M4A 格式参数
-  AVFormatIDKey: kAudioFormatMPEG4AAC
-  AVSampleRateKey: 48000
-  AVNumberOfChannelsKey: 2
-  AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-  
-  // MP3 格式参数
-  AVFormatIDKey: kAudioFormatMPEGLayer3
-  AVSampleRateKey: 48000
-  AVNumberOfChannelsKey: 2
-  AVEncoderBitRateKey: 128000
-  
-  // WAV 格式参数
-  AVFormatIDKey: kAudioFormatLinearPCM
-  AVSampleRateKey: 48000
-  AVNumberOfChannelsKey: 2
-  AVLinearPCMBitDepthKey: 16
-  AVLinearPCMIsFloatKey: false
-  ```
+- 用途: 音频文件写入/读取
+- 支持格式: M4A(AAC), WAV(PCM)（当前不支持 MP3 实时编码）
+- 常用参数:
+```swift
+// M4A (AAC) 建议参数
+AVFormatIDKey: kAudioFormatMPEG4AAC
+AVSampleRateKey: 48000
+AVNumberOfChannelsKey: 2
+AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+
+// WAV (PCM) 建议参数
+AVFormatIDKey: kAudioFormatLinearPCM
+AVSampleRateKey: 48000
+AVNumberOfChannelsKey: 2
+AVLinearPCMBitDepthKey: 16
+AVLinearPCMIsFloatKey: false
+AVLinearPCMIsBigEndianKey: false
+```
 
 #### ScreenCaptureKit (系统声音录制)
-- **用途**: 录制系统音频输出
-- **主要组件**:
-  - `SCStream`: 屏幕/音频捕获流
-  - `SCContentFilter`: 内容过滤器
-  - `SCStreamConfiguration`: 流配置
-  - `SCStreamOutput`: 流输出处理
+- 用途: 录制系统输出音频（macOS 12.3+）
+- 主要组件:
+  - `SCStream`、`SCContentFilter`、`SCStreamConfiguration`、`SCStreamOutput`
 
-### 2. 音频播放 API
-
-#### AVAudioPlayer
-- **用途**: 音频文件播放
-- **参数**:
-  ```swift
-  player.volume = 1.0  // 音量 (0.0 - 1.0)
-  player.prepareToPlay()  // 预加载音频
-  player.play()  // 开始播放
-  player.stop()  // 停止播放
-  ```
-
-#### AVAudioPlayerDelegate
-- **回调方法**:
-  - `audioPlayerDidFinishPlaying(_:successfully:)`: 播放完成回调
-
-### 3. 音频电平监控
-
-#### AVAudioPCMBuffer
-- **用途**: 音频缓冲区处理
-- **电平计算**:
-  ```swift
-  // RMS (Root Mean Square) 电平计算
-  let rms = sqrt(sum(sample²) / frameCount)
-  let level = min(1.0, rms * 20.0)  // 放大20倍显示
-  ```
-
-#### Timer
-- **用途**: 电平更新定时器
-- **更新频率**: 100ms (0.1秒)
-
-### 4. 用户界面 API
-
-#### AppKit 组件
-- **NSWindow**: 主窗口
-- **NSView**: 自定义视图
-- **NSButton**: 操作按钮
-- **NSTextField**: 文本显示
-- **NSPopUpButton**: 格式选择
-
-#### Core Animation
-- **CALayer**: 视图层
-- **CAGradientLayer**: 渐变效果
-- **CABasicAnimation**: 动画效果
-
-### 5. 文件管理 API
-
-#### FileManager
-- **用途**: 文件操作
-- **主要方法**:
-  - `fileExists(at:)`: 检查文件存在
-  - `attributesOfItem(atPath:)`: 获取文件属性
-  - `createDirectory(at:withIntermediateDirectories:)`: 创建目录
-
-#### UserDefaults
-- **用途**: 用户设置存储
-- **存储内容**:
-  - 上次录制模式
-  - 应用配置
-
-## 录制参数配置
-
-### 音频格式设置
+### 2. 播放与电平
+- 播放使用 `AVAudioEngine + AVAudioPlayerNode`；在 `mainMixerNode` 安装 tap 获取 `AVAudioPCMBuffer`，计算 RMS 电平并回调到 UI。
 ```swift
-// 默认格式: MP3
-private var currentFormat: AudioUtils.AudioFormat = .mp3
-
-// 采样率: 48kHz
-AVSampleRateKey: 48000
-
-// 声道数: 立体声 (2声道)
-AVNumberOfChannelsKey: 2
-
-// 缓冲区大小: 4096 帧
-bufferSize: 4096
+playbackEngine.mainMixerNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { buffer, _ in
+    let level = calculateRMSLevel(from: buffer)
+    onLevel?(level)
+}
 ```
 
-### 录制模式
-- **麦克风录制**: 使用 `AVAudioEngine.inputNode`
-- **系统声音录制**: 使用 `ScreenCaptureKit.SCStream`
-
-## 播放参数配置
-
-### 播放器设置
+### 3. 电平计算（RMS）
 ```swift
-// 音量: 最大
-player.volume = 1.0
-
-// 播放模式: 单次播放
-player.numberOfLoops = 0
-
-// 播放速率: 正常
-player.rate = 1.0
+let rms = sqrt(sum(sample*sample) / frameCount)
+let level = min(1.0, rms * 20.0)
 ```
 
-### 电平监控
+## 两种录制模式（关键代码 / 参数 / 注意事项）
+
+### A. 麦克风录制（AVAudioEngine）
+- 关键代码：`MicrophoneRecorder`
+  - 构图：`inputNode -> recordMixer -> mainMixerNode`
+  - 顺序：配置 -> 启动引擎 -> 安装 tap（避免未启动 tap 无数据）
+  - 写入：`AVAudioFile`（默认 M4A/AAC，48kHz，立体声）
+  - Tap：`recordMixer.installTap(onBus: 0, bufferSize: 4096, format: nil)`（用节点当前格式，降低格式不匹配风险）
+- 关键参数：
+  - 采样率 `48000`、声道 `2`、缓冲 `4096` 帧、`pcmFormatFloat32`
+  - `engine.mainMixerNode.outputVolume = 0` 避免监控时本地回放
+- 注意事项：
+  - 需要麦克风权限；首次在“切换到麦克风模式”时请求
+  - 文件与缓冲格式不一致会导致静音；采用 `format: nil` 让系统匹配
+
+### B. 系统声音录制（ScreenCaptureKit）
+- 关键代码：`SystemAudioRecorder`
+  - 获取内容：`SCShareableContent.excludingDesktopWindows(_, onScreenWindowsOnly: true)`
+  - 过滤器：`SCContentFilter(display: display, excludingApplications: [本应用])`
+  - 配置：
 ```swift
-// 更新间隔: 100ms
-private let updateInterval: TimeInterval = 0.1
-
-// 电平条数量: 50条
-private var bars: [Float] = Array(repeating: 0.0, count: 50)
+let config = SCStreamConfiguration()
+config.capturesAudio = true
+config.excludesCurrentProcessAudio = true // 包含本应用声音设为 false
+config.sampleRate = 48000
+config.channelCount = 2
+// 视频最小分辨率以驱动音频时钟
+config.width = 320; config.height = 240
+config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+config.queueDepth = 5
 ```
+  - 输出：同时添加 `.audio` 与 `.screen` 输出（视频最小处理）
+  - 写入：将 `CMSampleBuffer` 拷贝到 `AVAudioPCMBuffer` 再写入 `AVAudioFile`
+- 注意事项：
+  - 需要“屏幕录制”权限；macOS 12.3+ 才支持 ScreenCaptureKit
+  - 添加屏幕输出以驱动音频；`excludesCurrentProcessAudio` 控制是否录到本应用声音
+  - DRM/受保护内容可能被系统静音
 
-## 权限要求
+## 播放控制
+- 支持随时“停止播放”；播放状态下按钮文案变更为“停止播放”。
+- 电平为播放样式（蓝色）并提高灵敏度，视觉更动态。
 
-### 麦克风权限
-- **用途**: 录制麦克风输入
-- **系统提示**: 首次使用时系统会请求权限
-
-### 屏幕录制权限
-- **用途**: 录制系统声音
-- **系统提示**: 需要在系统偏好设置中手动授权
+## 权限要求与时机
+- 麦克风权限：在“切换到麦克风模式”时主动请求；录制时仅静默检查并引导。
+- 屏幕录制权限：在“切换到系统音频模式”时主动请求；录制前进行异步静默检查并引导设置。
 
 ## 文件输出
+- 默认保存位置：`~/Documents/AudioRecordings/`
+- 文件命名：`录音_YYYY-MM-DD_HH-mm-ss.m4a`（或 `.wav`）
 
-### 默认保存位置
-```
-~/Documents/AudioRecordings/
-```
-
-### 文件命名格式
-```
-录音_YYYY-MM-DD_HH-mm-ss.mp3
-```
-
-## 技术架构
-
-### 主要类结构
+## 主要类结构
 - `AppDelegate`: 应用程序生命周期管理
 - `MainViewController`: 主视图控制器
-- `AudioRecorderController`: 音频录制控制器
+- `AudioRecorderController`: 音频录制控制器（工厂，切换模式）
 - `MainWindowView`: 主窗口视图
-- `LevelMeterView`: 电平表视图
+- `LevelMeterView`: 电平表视图（录制=红色，播放=蓝色）
 - `LevelMonitor`: 电平监控器
 - `AudioUtils`: 音频工具类
 - `FileManagerUtils`: 文件管理工具
 - `Logger`: 日志记录器
 
-### 设计模式
-- **委托模式**: 视图与控制器通信
-- **观察者模式**: 状态变化通知
-- **单例模式**: 工具类实例管理
+## 设计模式
+- 委托模式：视图与控制器通信
+- 观察者模式：状态变化通知
+- 单例模式：工具类实例管理
+
+## 可选参数与可扩展功能
+- ScreenCaptureKit：
+  - `excludesCurrentProcessAudio` 切换是否录到本应用声音
+  - `captureMicrophone = true`（叠加麦克风，需添加 `.microphone` 输出）
+  - `width/height/minimumFrameInterval/queueDepth` 影响性能与延迟
+  - macOS 15+ 可用 `SCRecordingOutput` 直接封装为 MP4（参考 Apple Sample）
+- AVAudioEngine：
+  - 在 `recordMixer` 上做音量、EQ、压缩、混响等实时处理
+  - 同时录制系统声音与麦克风：混合到同一文件或分别落盘
+- 文件格式：
+  - M4A（AAC）硬件加速、体积小；WAV（PCM）无损、适合后期处理
+- 后期处理：
+  - 响度归一、降噪、压缩；或导出 WAV 后离线转码为 MP3（LAME/FFmpeg）

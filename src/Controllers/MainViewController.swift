@@ -278,20 +278,25 @@ class MainViewController: NSViewController {
             logger.info("检查屏幕录制权限...")
             mainWindowView.updateStatus("正在检查屏幕录制权限...")
             
-            // 录制阶段仅静默检查，不触发系统弹窗
-            let status = PermissionManager.shared.checkScreenRecordingPermissionReal()
-            switch status {
-            case .granted:
-                logger.info("屏幕录制权限已授予")
-                completion(true)
-            case .denied, .restricted:
-                logger.warning("屏幕录制权限不足（录制阶段不弹窗）")
-                mainWindowView.updateStatus("屏幕录制权限被拒绝，请点击权限设置按钮在系统设置中允许")
-                completion(false)
-            case .notDetermined:
-                logger.info("屏幕录制权限未确定（录制阶段不弹窗）")
-                mainWindowView.updateStatus("需要屏幕录制权限，请点击权限设置按钮")
-                completion(false)
+            // 录制阶段仅静默检查（异步），不触发系统弹窗，避免阻塞主线程
+            Task { [weak self] in
+                guard let self = self else { return }
+                let status = await PermissionManager.shared.checkScreenRecordingPermissionAsync()
+                await MainActor.run {
+                    switch status {
+                    case .granted:
+                        self.logger.info("屏幕录制权限已授予")
+                        completion(true)
+                    case .denied, .restricted:
+                        self.logger.warning("屏幕录制权限不足（录制阶段不弹窗）")
+                        self.mainWindowView.updateStatus("屏幕录制权限被拒绝，请点击权限设置按钮在系统设置中允许")
+                        completion(false)
+                    case .notDetermined:
+                        self.logger.info("屏幕录制权限未确定（录制阶段不弹窗）")
+                        self.mainWindowView.updateStatus("需要屏幕录制权限，请点击权限设置按钮")
+                        completion(false)
+                    }
+                }
             }
         }
     }
@@ -580,8 +585,6 @@ class MainViewController: NSViewController {
     private func changeFormat(_ formatString: String) {
         let newFormat: AudioUtils.AudioFormat
         switch formatString.lowercased() {
-        case "mp3":
-            newFormat = .mp3
         case "wav":
             newFormat = .wav
         default:
@@ -629,6 +632,10 @@ extension MainViewController: MainWindowViewDelegate {
     
     func mainWindowViewDidOpenPermissions(_ view: MainWindowView) {
         openSystemPreferences()
+    }
+    
+    func mainWindowViewDidStopPlayback(_ view: MainWindowView) {
+        stopPlayback()
     }
     
     private func openSystemPreferences() {

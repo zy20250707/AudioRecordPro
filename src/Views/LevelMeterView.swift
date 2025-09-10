@@ -7,6 +7,14 @@ class LevelMeterView: NSView {
     private var bars: [Float] = Array(repeating: 0.0, count: 50)
     private let animationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in }
     
+    private enum Style {
+        case recording
+        case playback
+    }
+    
+    private var style: Style = .recording
+    private var sensitivityMultiplier: Float = 1.0
+    
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setupView()
@@ -40,9 +48,18 @@ class LevelMeterView: NSView {
         if level > 0 {
             // 基于真实音频电平更新多段式声纹效果
             for i in 0..<bars.count {
-                let targetLevel = level * Float.random(in: 0.7...1.0)
-                let decay = Float(0.8) // 衰减系数
+                // 非线性提升灵敏度，增强视觉动态
+                let boosted = pow(min(1.0, level * sensitivityMultiplier), 0.7)
+                // 更宽的随机区间并限制最大值到1.0
+                var targetLevel = boosted * Float.random(in: 0.6...1.2)
+                targetLevel = min(1.0, max(0.0, targetLevel))
+                // 更快的响应，降低衰减，获得更炫酷的跳动
+                let decay = Float(0.7)
                 bars[i] = bars[i] * decay + targetLevel * (1 - decay)
+                // 偶尔触发微小脉冲，增加活力
+                if Int.random(in: 0...80) == 0 {
+                    bars[i] = min(1.0, bars[i] + 0.2)
+                }
             }
         } else {
             // 没有音频输入时，所有条都归零
@@ -83,9 +100,16 @@ class LevelMeterView: NSView {
             
             let barRect = NSRect(x: x, y: y, width: barWidth, height: height)
             
-            // 使用Web版本的红色渐变色彩
-            let redValue = min(255, Int(barLevel * 255) + 100)
-            let color = NSColor(red: CGFloat(redValue) / 255.0, green: 50.0 / 255.0, blue: 50.0 / 255.0, alpha: 1.0)
+            // 根据样式选择颜色：录制=红色，播放=蓝色，并提升播放时亮度
+            let color: NSColor
+            switch style {
+            case .recording:
+                let redValue = min(255, Int(barLevel * 255) + 100)
+                color = NSColor(red: CGFloat(redValue) / 255.0, green: 50.0 / 255.0, blue: 50.0 / 255.0, alpha: 1.0)
+            case .playback:
+                let blueBoost = min(255, Int(barLevel * 255) + 120)
+                color = NSColor(red: 50.0 / 255.0, green: 120.0 / 255.0, blue: CGFloat(blueBoost) / 255.0, alpha: 1.0)
+            }
             
             color.setFill()
             let barPath = NSBezierPath(rect: barRect)
@@ -98,6 +122,17 @@ class LevelMeterView: NSView {
         level = 0.0
         bars = Array(repeating: 0.0, count: 50)
         needsDisplay = true
+    }
+    
+    // MARK: - Style Controls
+    func setPlaybackStyle() {
+        style = .playback
+        sensitivityMultiplier = 1.4
+    }
+    
+    func setRecordingStyle() {
+        style = .recording
+        sensitivityMultiplier = 1.0
     }
     
     /// 开始动画

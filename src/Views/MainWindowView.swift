@@ -23,6 +23,7 @@ class MainWindowView: NSView {
     
     // MARK: - Properties
     weak var delegate: MainWindowViewDelegate?
+    private var currentState: RecordingState = .idle
     
     // MARK: - Initialization
     override init(frame frameRect: NSRect) {
@@ -123,9 +124,9 @@ class MainWindowView: NSView {
         modeSwitchButton.isEnabled = true
         modeSwitchButton.wantsLayer = true
         
-        // 优化录制模式切换按钮颜色
+        // 优化录制模式切换按钮颜色与尺寸（与其他按钮风格更一致）
         modeSwitchButton.layer?.backgroundColor = NSColor(red: 0.20, green: 0.60, blue: 0.86, alpha: 1.0).cgColor // #3498db 蓝色
-        modeSwitchButton.layer?.cornerRadius = 14 // 完全圆形 (高度28/2)
+        modeSwitchButton.layer?.cornerRadius = 16 // 与高度32匹配
         modeSwitchButton.layer?.borderWidth = 0 // 隐藏调试边框
         modeSwitchButton.layer?.borderColor = NSColor.clear.cgColor
         
@@ -292,7 +293,7 @@ class MainWindowView: NSView {
         formatLabel.translatesAutoresizingMaskIntoConstraints = false
         cardView.addSubview(formatLabel)
         
-        formatPopup.addItems(withTitles: ["M4A", "MP3", "WAV"])
+        formatPopup.addItems(withTitles: ["M4A", "WAV"])
         formatPopup.selectItem(at: 0)
         formatPopup.target = self
         formatPopup.action = #selector(formatPopupChanged)
@@ -357,11 +358,11 @@ class MainWindowView: NSView {
             modeLabel.topAnchor.constraint(equalTo: modeContainer.topAnchor, constant: 10),
             modeLabel.centerXAnchor.constraint(equalTo: modeContainer.centerXAnchor),
             
-            // 切换按钮 - 使用Web版本的精确尺寸
+            // 切换按钮 - 与其他按钮视觉更一致
             modeSwitchButton.topAnchor.constraint(equalTo: modeLabel.bottomAnchor, constant: 8),
             modeSwitchButton.centerXAnchor.constraint(equalTo: modeContainer.centerXAnchor),
-            modeSwitchButton.widthAnchor.constraint(equalToConstant: 100),
-            modeSwitchButton.heightAnchor.constraint(equalToConstant: 28),
+            modeSwitchButton.widthAnchor.constraint(equalToConstant: 130),
+            modeSwitchButton.heightAnchor.constraint(equalToConstant: 32),
             
             // 计时器 - 增加高度约束解决底部截断问题
             timerLabel.topAnchor.constraint(equalTo: modeContainer.bottomAnchor, constant: 20),
@@ -470,14 +471,13 @@ class MainWindowView: NSView {
     @objc private func stopButtonClicked() {
         animateButtonClick(stopButton) {
             Logger.shared.info("🛑 停止按钮被点击!")
-            Logger.shared.info("停止按钮是否启用: \(self.stopButton.isEnabled)")
-            Logger.shared.info("委托对象: \(String(describing: self.delegate))")
-            
-            if let delegate = self.delegate {
-                Logger.shared.info("✅ 正在调用停止录制委托方法...")
-                delegate.mainWindowViewDidStopRecording(self)
-            } else {
-                Logger.shared.error("❌ 未设置委托对象!")
+            switch self.currentState {
+            case .recording:
+                self.delegate?.mainWindowViewDidStopRecording(self)
+            case .playing:
+                self.delegate?.mainWindowViewDidStopPlayback(self)
+            default:
+                break
             }
         }
     }
@@ -542,10 +542,19 @@ class MainWindowView: NSView {
         case .idle:
             startButton.isEnabled = true
             stopButton.isEnabled = false
+            stopButton.title = "停止录音"
+            stopButton.attributedTitle = NSAttributedString(
+                string: "停止录音",
+                attributes: [
+                    .foregroundColor: NSColor.white,
+                    .font: NSFont.systemFont(ofSize: 14, weight: .bold)
+                ]
+            )
             playButton.isEnabled = true
             downloadButton.isEnabled = true
             modeSwitchButton.isEnabled = true
             levelMeterView.reset()
+            levelMeterView.setRecordingStyle()
         case .preparing:
             startButton.isEnabled = false
             stopButton.isEnabled = false
@@ -555,10 +564,19 @@ class MainWindowView: NSView {
         case .recording:
             startButton.isEnabled = false
             stopButton.isEnabled = true
+            stopButton.title = "停止录音"
+            stopButton.attributedTitle = NSAttributedString(
+                string: "停止录音",
+                attributes: [
+                    .foregroundColor: NSColor.white,
+                    .font: NSFont.systemFont(ofSize: 14, weight: .bold)
+                ]
+            )
             playButton.isEnabled = false
             downloadButton.isEnabled = false
             modeSwitchButton.isEnabled = false
             levelMeterView.startAnimation()
+            levelMeterView.setRecordingStyle()
         case .stopping:
             startButton.isEnabled = false
             stopButton.isEnabled = false
@@ -567,18 +585,37 @@ class MainWindowView: NSView {
             modeSwitchButton.isEnabled = false
         case .playing:
             startButton.isEnabled = true
-            stopButton.isEnabled = false
+            stopButton.isEnabled = true
+            stopButton.title = "停止播放"
+            stopButton.attributedTitle = NSAttributedString(
+                string: "停止播放",
+                attributes: [
+                    .foregroundColor: NSColor.white,
+                    .font: NSFont.systemFont(ofSize: 14, weight: .bold)
+                ]
+            )
             playButton.isEnabled = false
             downloadButton.isEnabled = true
             modeSwitchButton.isEnabled = true
+            levelMeterView.setPlaybackStyle()
         case .error:
             startButton.isEnabled = true
             stopButton.isEnabled = false
+            stopButton.title = "停止录音"
+            stopButton.attributedTitle = NSAttributedString(
+                string: "停止录音",
+                attributes: [
+                    .foregroundColor: NSColor.white,
+                    .font: NSFont.systemFont(ofSize: 14, weight: .bold)
+                ]
+            )
             playButton.isEnabled = true
             downloadButton.isEnabled = true
             modeSwitchButton.isEnabled = true
             levelMeterView.reset()
+            levelMeterView.setRecordingStyle()
         }
+        currentState = state
     }
 }
 
@@ -591,4 +628,5 @@ protocol MainWindowViewDelegate: AnyObject {
     func mainWindowViewDidDownloadRecording(_ view: MainWindowView)
     func mainWindowViewDidChangeFormat(_ view: MainWindowView, format: String)
     func mainWindowViewDidOpenPermissions(_ view: MainWindowView)
+    func mainWindowViewDidStopPlayback(_ view: MainWindowView)
 }

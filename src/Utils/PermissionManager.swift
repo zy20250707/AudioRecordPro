@@ -56,9 +56,12 @@ class PermissionManager {
     
     /// 检查屏幕录制权限（静默检查，不触发系统对话框）
     private func checkScreenRecordingPermission() -> PermissionStatus {
-        // 使用真实的权限检查
-        return checkScreenRecordingPermissionReal()
+        // 使用最近一次异步检测的缓存或保守返回 .notDetermined
+        return lastScreenRecordingStatus ?? .notDetermined
     }
+
+    // 缓存最近一次的屏幕录制权限结果，避免阻塞主线程
+    private var lastScreenRecordingStatus: PermissionStatus?
     
     /// 请求麦克风权限
     func requestMicrophonePermission(completion: @escaping (PermissionStatus) -> Void) {
@@ -106,29 +109,20 @@ class PermissionManager {
     }
     
     /// 真正的屏幕录制权限检查（只在需要时调用）
-    func checkScreenRecordingPermissionReal() -> PermissionStatus {
-        var status: PermissionStatus = .notDetermined
-        let semaphore = DispatchSemaphore(value: 0)
-        
-        Task {
-            do {
-                let _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                status = .granted
-            } catch {
-                if error.localizedDescription.contains("permission") || 
-                   error.localizedDescription.contains("权限") ||
-                   error.localizedDescription.contains("denied") ||
-                   error.localizedDescription.contains("not authorized") {
-                    status = .denied
-                } else {
-                    status = .notDetermined
-                }
-            }
-            semaphore.signal()
+    func checkScreenRecordingPermissionAsync() async -> PermissionStatus {
+        do {
+            let _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            await MainActor.run { self.lastScreenRecordingStatus = .granted }
+            return .granted
+        } catch {
+            let denied = error.localizedDescription.contains("permission") ||
+                        error.localizedDescription.contains("权限") ||
+                        error.localizedDescription.contains("denied") ||
+                        error.localizedDescription.contains("not authorized")
+            let status: PermissionStatus = denied ? .denied : .notDetermined
+            await MainActor.run { self.lastScreenRecordingStatus = status }
+            return status
         }
-        
-        semaphore.wait()
-        return status
     }
     
     /// 开始权限监控（定期检查权限状态变化）
@@ -136,24 +130,26 @@ class PermissionManager {
         stopPermissionMonitoring()
         
         var lastMicrophoneStatus = checkMicrophonePermission()
-        var lastScreenRecordingStatus = checkScreenRecordingPermission()
+        var lastScreenStatus = self.lastScreenRecordingStatus ?? .notDetermined
         
         permissionCheckTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             
             let currentMicrophoneStatus = self.checkMicrophonePermission()
-            let currentScreenRecordingStatus = self.checkScreenRecordingPermission()
+            // 异步检查屏幕录制权限，避免阻塞主线程
+            Task { [weak self] in
+                guard let self = self else { return }
+                let currentScreenRecordingStatus = await self.checkScreenRecordingPermissionAsync()
+                if currentScreenRecordingStatus != lastScreenStatus {
+                    lastScreenStatus = currentScreenRecordingStatus
+                    onStatusChange(.screenRecording, currentScreenRecordingStatus)
+                }
+            }
             
             // 检查麦克风权限变化
             if currentMicrophoneStatus != lastMicrophoneStatus {
                 lastMicrophoneStatus = currentMicrophoneStatus
                 onStatusChange(.microphone, currentMicrophoneStatus)
-            }
-            
-            // 检查屏幕录制权限变化
-            if currentScreenRecordingStatus != lastScreenRecordingStatus {
-                lastScreenRecordingStatus = currentScreenRecordingStatus
-                onStatusChange(.screenRecording, currentScreenRecordingStatus)
             }
         }
     }

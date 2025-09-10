@@ -14,7 +14,6 @@ class AudioUtils {
     /// 音频格式枚举
     enum AudioFormat: String, CaseIterable {
         case m4a = "M4A"
-        case mp3 = "MP3"
         case wav = "WAV"
         
         var fileExtension: String {
@@ -29,13 +28,6 @@ class AudioUtils {
                     AVSampleRateKey: 48000,
                     AVNumberOfChannelsKey: 2,
                     AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-                ]
-            case .mp3:
-                return [
-                    AVFormatIDKey: kAudioFormatMPEGLayer3,
-                    AVSampleRateKey: 48000,
-                    AVNumberOfChannelsKey: 2,
-                    AVEncoderBitRateKey: 128000
                 ]
             case .wav:
                 return [
