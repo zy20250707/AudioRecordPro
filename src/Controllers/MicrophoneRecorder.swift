@@ -9,6 +9,8 @@ class MicrophoneRecorder: BaseAudioRecorder {
     private let engine = AVAudioEngine()
     private let recordMixer = AVAudioMixerNode()
     private var mixerFormat: AVAudioFormat?
+    // 调试用：强制使用PCM(WAV)参数写入，验证输入链路（与输入buffer格式一致，避免编码干扰）
+    private let forcePCMForDebug: Bool = true
     
     // MARK: - Initialization
     override init(mode: AudioUtils.RecordingMode) {
@@ -26,16 +28,20 @@ class MicrophoneRecorder: BaseAudioRecorder {
         logger.info("开始录制，模式: \(recordingMode.rawValue), 格式: \(currentFormat.rawValue)")
         
         do {
-            // Create audio file
-            try createAudioFile(at: url, format: currentFormat)
-            
-            // Setup audio engine
+            // 打印可用麦克风输入设备信息，帮助诊断“有缓冲但为静音”的情况
+            logAvailableAudioInputDevices()
+
+            // 1) 搭建图
             setupAudioEngine()
             
-            // Install microphone recording tap
+            // 2) 使用 inputNode 原生格式创建文件（最稳妥）
+            let inputFormat = engine.inputNode.inputFormat(forBus: 0)
+            try createAudioFileForInput(at: url, inputFormat: inputFormat)
+            
+            // 3) 在 inputNode 安装 tap（旁路抓取麦克风PCM）
             installMicrophoneRecordingTap()
             
-            // Start audio engine
+            // 4) 启动引擎（确保节点实际输出格式稳定）
             try startAudioEngine()
             
             // Start monitoring
@@ -90,33 +96,68 @@ class MicrophoneRecorder: BaseAudioRecorder {
         engine.connect(input, to: recordMixer, format: inputFormat)
         logger.info("已连接麦克风输入到混音器")
     }
+
+    private func logAvailableAudioInputDevices() {
+        let audioDevices = AVCaptureDevice.devices(for: .audio)
+        if audioDevices.isEmpty {
+            logger.warning("未发现音频输入设备（AVCaptureDevice.devices(for: .audio) 为空）")
+            return
+        }
+        logger.info("发现音频输入设备数量: \(audioDevices.count)")
+        for (idx, dev) in audioDevices.enumerated() {
+            logger.info("输入设备[\(idx)]: name=\(dev.localizedName), uniqueID=\(dev.uniqueID), connected=\(dev.isConnected)")
+        }
+        if let defaultDevice = AVCaptureDevice.default(for: .audio) {
+            logger.info("默认音频输入设备: \(defaultDevice.localizedName) (\(defaultDevice.uniqueID))")
+        } else {
+            logger.warning("无法获取默认音频输入设备（AVCaptureDevice.default 为 nil）")
+        }
+    }
     
-    private func createAudioFile(at url: URL, format: AudioUtils.AudioFormat) throws {
-        // Use microphone input format for recording
+    override func createAudioFile(at url: URL, format: AudioUtils.AudioFormat) throws {
+        // 录制时根据 inputNode 的原生格式创建
         let inputFormat = engine.inputNode.inputFormat(forBus: 0)
-        let audioSettings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: inputFormat.sampleRate,
-            AVNumberOfChannelsKey: inputFormat.channelCount,
-            AVEncoderBitRateKey: 128000
-        ]
-        logger.info("麦克风录制使用格式: \(audioSettings)")
-        
+        try createAudioFileForInput(at: url, inputFormat: inputFormat)
+    }
+
+    private func createAudioFileForInput(at url: URL, inputFormat: AVAudioFormat) throws {
+        let sampleRate = inputFormat.sampleRate
+        let channels = Int(inputFormat.channelCount)
+        let audioSettings: [String: Any]
+        if forcePCMForDebug {
+            // 与 input buffer 完全一致的 WAV(PCM Float32, non-interleaved)，避免格式不匹配导致的静音
+            audioSettings = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: sampleRate,
+                AVNumberOfChannelsKey: channels,
+                AVLinearPCMBitDepthKey: 32,
+                AVLinearPCMIsFloatKey: true,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsNonInterleaved: true
+            ]
+            logger.info("调试模式：使用WAV(PCM Float32)写入，rate=\(sampleRate), ch=\(channels)")
+        } else {
+            audioSettings = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: sampleRate,
+                AVNumberOfChannelsKey: channels,
+                AVEncoderBitRateKey: 128000
+            ]
+            logger.info("麦克风录制使用AAC: rate=\(sampleRate), ch=\(channels)")
+        }
         audioFile = try AVAudioFile(forWriting: url, settings: audioSettings)
         outputURL = url
-        
         onStatus?("文件创建成功: \(url.lastPathComponent)")
         logger.info("麦克风录制文件创建成功: \(url.lastPathComponent)")
         logger.info("文件格式: \(audioFile?.processingFormat.settings ?? [:])")
     }
     
     private func installMicrophoneRecordingTap() {
-        guard let mixerOutputFormat = mixerFormat else {
-            logger.error("混音器格式未设置")
-            return
-        }
-        
-        recordMixer.installTap(onBus: 0, bufferSize: 4096, format: mixerOutputFormat) { [weak self] buffer, time in
+        // 直接在 inputNode 上安装 tap（使用其原生格式抓取）
+        let input = engine.inputNode
+        let inputFormat = input.inputFormat(forBus: 0)
+        input.removeTap(onBus: 0)
+        input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, time in
             guard let self = self, let file = self.audioFile else { return }
             
             // Write to audio file
@@ -130,16 +171,14 @@ class MicrophoneRecorder: BaseAudioRecorder {
             let level = self.calculateRMSLevel(from: buffer)
             
             // Add debug info
-            if level > 0.01 { // Only print when there's significant level
-                self.logger.info("麦克风录制电平: \(String(format: "%.3f", level)), 帧数: \(buffer.frameLength)")
-            }
+            self.logger.info("麦克风录制电平: \(String(format: "%.4f", level)), 帧数: \(buffer.frameLength), rate=\(buffer.format.sampleRate), ch=\(buffer.format.channelCount)")
             
             Task { @MainActor in
                 self.onLevel?(level)
             }
         }
         
-        logger.info("麦克风录制监听已安装")
+        logger.info("麦克风录制监听已安装（inputNode）")
     }
     
     private func startAudioEngine() throws {

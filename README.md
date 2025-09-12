@@ -128,7 +128,7 @@ config.queueDepth = 5
 ## 可选参数与可扩展功能
 - ScreenCaptureKit：
   - `excludesCurrentProcessAudio` 切换是否录到本应用声音
-  - `captureMicrophone = true`（叠加麦克风，需添加 `.microphone` 输出）
+  - `captureMicrophone = true`（**仅用于屏幕录制时叠加麦克风解说**，不适合纯麦克风录制）
   - `width/height/minimumFrameInterval/queueDepth` 影响性能与延迟
   - macOS 15+ 可用 `SCRecordingOutput` 直接封装为 MP4（参考 Apple Sample）
 - AVAudioEngine：
