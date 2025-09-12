@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 
 /// 音频录制器协议
+@MainActor
 protocol AudioRecorderProtocol: AnyObject {
     
     // MARK: - Properties
@@ -32,7 +33,7 @@ protocol AudioRecorderProtocol: AnyObject {
 class BaseAudioRecorder: NSObject, AudioRecorderProtocol {
     
     // MARK: - Properties
-    private(set) var isRunning = false
+    var isRunning = false
     let recordingMode: AudioUtils.RecordingMode
     private(set) var currentFormat: AudioUtils.AudioFormat = .m4a
     
@@ -136,7 +137,7 @@ class BaseAudioRecorder: NSObject, AudioRecorderProtocol {
         var sampleRate: Double = 48000
         var channels: Int = 2
         
-        if let audioInfo = audioUtils.getAudioFileInfo(at: url) {
+        if let audioInfo = AudioUtils.shared.getAudioFileInfo(at: url) {
             duration = audioInfo.duration
             sampleRate = audioInfo.sampleRate
             channels = Int(audioInfo.channels)

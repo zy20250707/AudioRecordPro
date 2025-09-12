@@ -37,6 +37,7 @@ swiftc \
   "$STAGE_DIR/src/Models/AudioRecording.swift" \
   "$STAGE_DIR/src/Views/LevelMeterView.swift" \
   "$STAGE_DIR/src/Views/MainWindowView.swift" \
+  "$STAGE_DIR/src/Controllers/AudioRecorderProtocol.swift" \
   "$STAGE_DIR/src/Controllers/MicrophoneRecorder.swift" \
   "$STAGE_DIR/src/Controllers/SystemAudioRecorder.swift" \
   "$STAGE_DIR/src/Controllers/AudioRecorderController.swift" \
