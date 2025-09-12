@@ -98,9 +98,14 @@ class MicrophoneRecorder: BaseAudioRecorder {
     }
 
     private func logAvailableAudioInputDevices() {
-        let audioDevices = AVCaptureDevice.devices(for: .audio)
+        let session = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInMicrophone, .externalUnknown],
+            mediaType: .audio,
+            position: .unspecified
+        )
+        let audioDevices = session.devices
         if audioDevices.isEmpty {
-            logger.warning("未发现音频输入设备（AVCaptureDevice.devices(for: .audio) 为空）")
+            logger.warning("未发现音频输入设备（DiscoverySession.devices 为空）")
             return
         }
         logger.info("发现音频输入设备数量: \(audioDevices.count)")

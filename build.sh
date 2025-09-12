@@ -46,6 +46,38 @@ swiftc \
 echo "[3/4] 拷贝 Info.plist 与资源..."
 plutil -convert binary1 "$ROOT_DIR/Info.plist" -o "$CONTENTS_DIR/Info.plist"
 
+# 复制资源文件（如应用图标等）到 Resources
+if [ -d "$ROOT_DIR/assets" ]; then
+  rsync -a "$ROOT_DIR/assets/" "$RESOURCES_DIR/"
+fi
+
+# 生成标准 macOS App 图标（.icns）
+ICON_SRC="$ROOT_DIR/assets/AudioRecordLogo.png"
+if [ -f "$ICON_SRC" ]; then
+  echo "[3.2/4] 生成 App 图标 (.icns)..."
+  ICONSET_DIR="$BUILD_DIR/AppIcon.iconset"
+  TMP_ICON="$BUILD_DIR/AppIcon-1024.png"
+  rm -rf "$ICONSET_DIR"
+  mkdir -p "$ICONSET_DIR"
+  # 归一化为 1024x1024 正方形（等比缩放后再居中裁剪）
+  sips -s format png "$ICON_SRC" --resampleHeightWidthMax 1024 --out "$TMP_ICON" >/dev/null
+  sips -s format png "$TMP_ICON" --cropToHeightWidth 1024 1024 --out "$TMP_ICON" >/dev/null
+
+  gen_icon() { local size=$1 name=$2; sips -s format png "$TMP_ICON" --resampleHeightWidth $size $size --out "$ICONSET_DIR/$name" >/dev/null; }
+  gen_icon 16  icon_16x16.png
+  gen_icon 32  icon_16x16@2x.png
+  gen_icon 32  icon_32x32.png
+  gen_icon 64  icon_32x32@2x.png
+  gen_icon 128 icon_128x128.png
+  gen_icon 256 icon_128x128@2x.png
+  gen_icon 256 icon_256x256.png
+  gen_icon 512 icon_256x256@2x.png
+  gen_icon 512 icon_512x512.png
+  gen_icon 1024 icon_512x512@2x.png
+
+  iconutil -c icns "$ICONSET_DIR" -o "$RESOURCES_DIR/AppIcon.icns"
+fi
+
 echo "[3.5/4] 代码签名..."
 # 使用 ad-hoc 签名，这样系统会认为这是同一个应用
 codesign --force --sign - "$APP_DIR"

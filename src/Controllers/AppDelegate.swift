@@ -15,6 +15,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // 设置应用策略
         NSApp.setActivationPolicy(.regular)
+
+        // 设置应用 Dock 图标（从 Resources 加载 assets/AudioRecordLogo.png）
+        if let iconURL = Bundle.main.url(forResource: "AudioRecordLogo", withExtension: "png") {
+            if let iconImage = NSImage(contentsOf: iconURL) {
+                NSApp.applicationIconImage = iconImage
+                logger.info("应用图标已设置: AudioRecordLogo.png")
+            } else {
+                logger.warning("无法加载应用图标图像数据")
+            }
+        } else {
+            logger.warning("未找到应用图标资源 AudioRecordLogo.png")
+        }
         
         // 创建主窗口
         createMainWindow()

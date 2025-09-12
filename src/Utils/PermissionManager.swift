@@ -62,6 +62,8 @@ class PermissionManager {
 
     // 缓存最近一次的屏幕录制权限结果，避免阻塞主线程
     private var lastScreenRecordingStatus: PermissionStatus?
+    // 最近一次已回调给外部的屏幕录制权限状态（用于去抖变更通知，避免并发捕获局部变量）
+    private var lastEmittedScreenStatus: PermissionStatus?
     
     /// 请求麦克风权限
     func requestMicrophonePermission(completion: @escaping (PermissionStatus) -> Void) {
@@ -130,7 +132,6 @@ class PermissionManager {
         stopPermissionMonitoring()
         
         var lastMicrophoneStatus = checkMicrophonePermission()
-        var lastScreenStatus = self.lastScreenRecordingStatus ?? .notDetermined
         
         permissionCheckTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             guard let self = self else { return }
@@ -140,9 +141,12 @@ class PermissionManager {
             Task { [weak self] in
                 guard let self = self else { return }
                 let currentScreenRecordingStatus = await self.checkScreenRecordingPermissionAsync()
-                if currentScreenRecordingStatus != lastScreenStatus {
-                    lastScreenStatus = currentScreenRecordingStatus
-                    onStatusChange(.screenRecording, currentScreenRecordingStatus)
+                await MainActor.run {
+                    let previous = self.lastEmittedScreenStatus ?? .notDetermined
+                    if currentScreenRecordingStatus != previous {
+                        self.lastEmittedScreenStatus = currentScreenRecordingStatus
+                        onStatusChange(.screenRecording, currentScreenRecordingStatus)
+                    }
                 }
             }
             

@@ -10,7 +10,19 @@
 
 ## 核心系统 API
 
-### 1. 音频录制 API
+### 1. 核心框架介绍
+
+#### AVFoundation
+- **作用**: 音频应用的基础框架，负责所有音频相关的系统操作
+- **功能**: 音频录制、播放、格式转换、权限管理
+- **关键组件**: AVAudioEngine、AVAudioFile、AVAudioMixerNode
+
+#### Accelerate
+- **作用**: 性能优化的数学计算框架，专门用于实时音频分析
+- **功能**: 高性能数学运算、信号处理、音频电平计算
+- **关键组件**: vDSP 函数库，用于 RMS 计算和音频分析
+
+### 2. 音频录制 API
 
 #### AVAudioEngine
 - 用途: 麦克风录制/播放链路核心
@@ -44,7 +56,7 @@ AVLinearPCMIsBigEndianKey: false
 - 主要组件:
   - `SCStream`、`SCContentFilter`、`SCStreamConfiguration`、`SCStreamOutput`
 
-### 2. 播放与电平
+### 3. 播放与电平
 - 播放使用 `AVAudioEngine + AVAudioPlayerNode`；在 `mainMixerNode` 安装 tap 获取 `AVAudioPCMBuffer`，计算 RMS 电平并回调到 UI。
 ```swift
 playbackEngine.mainMixerNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { buffer, _ in
@@ -53,7 +65,7 @@ playbackEngine.mainMixerNode.installTap(onBus: 0, bufferSize: 4096, format: nil)
 }
 ```
 
-### 3. 电平计算（RMS）
+### 4. 电平计算（RMS）
 ```swift
 let rms = sqrt(sum(sample*sample) / frameCount)
 let level = min(1.0, rms * 20.0)
