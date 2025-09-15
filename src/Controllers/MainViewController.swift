@@ -33,17 +33,22 @@ class MainViewController: NSViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        audioRecorderController = AudioRecorderController()
-        setupAudioRecorder()
+        logger.info("主视图控制器开始加载")
         setupInitialState()
         logger.info("主视图控制器已加载")
     }
     
+    private func ensureAudioControllerInitialized() {
+        guard audioRecorderController == nil else { return }
+        
+        logger.info("开始初始化音频控制器")
+        audioRecorderController = AudioRecorderController()
+        setupAudioRecorder()
+        logger.info("音频控制器初始化完成")
+    }
+    
     override func viewDidAppear() {
         super.viewDidAppear()
-        
-        // 只进行静默的权限状态检查，不弹窗
-        checkAudioPermissionsSilently()
         
         // 延迟检查按钮位置
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -53,6 +58,11 @@ class MainViewController: NSViewController {
     
     // MARK: - Setup
     private func setupAudioRecorder() {
+        guard let audioRecorderController = audioRecorderController else {
+            logger.warning("音频控制器未初始化，跳过设置")
+            return
+        }
+        
         audioRecorderController.onLevel = { [weak self] level in
             DispatchQueue.main.async {
                 self?.mainWindowView.updateLevel(level)
@@ -224,6 +234,9 @@ class MainViewController: NSViewController {
             return
         }
         
+        // 确保音频控制器已初始化
+        ensureAudioControllerInitialized()
+        
         logger.info("开始录制，模式: \(currentRecordingMode.rawValue)")
         
         // 检查权限
@@ -242,7 +255,7 @@ class MainViewController: NSViewController {
             self.mainWindowView.updateRecordingState(.preparing)
             self.mainWindowView.updateStatus("准备录制 \(self.currentRecordingMode.displayName)…")
             
-            self.audioRecorderController.startRecording()
+            self.audioRecorderController?.startRecording()
             self.startTimer()
             
             // 延迟更新为录制状态
@@ -255,45 +268,46 @@ class MainViewController: NSViewController {
     }
     
     private func checkPermissionsBeforeRecording(completion: @escaping (Bool) -> Void) {
-        let permissions = PermissionManager.shared.checkAllPermissions()
-        
         if currentRecordingMode == .microphone {
-            // 检查麦克风权限
-            switch permissions.microphone {
-            case .granted:
-                logger.info("麦克风权限检查通过")
-                completion(true)
-            case .denied, .restricted:
-                logger.warning("麦克风权限不足")
-                mainWindowView.updateStatus("麦克风权限被拒绝，请切换到系统音频模式")
-                completion(false)
-            case .notDetermined:
-                // 录制阶段不再弹窗请求权限，仅提示引导
-                logger.info("麦克风权限未确定（录制阶段不弹窗），请在切换到麦克风模式时授权")
-                mainWindowView.updateStatus("需要麦克风权限，请点击权限设置按钮或切换到系统音频模式")
-                completion(false)
+            // 请求麦克风权限
+            logger.info("请求麦克风权限...")
+            mainWindowView.updateStatus("正在请求麦克风权限...")
+            
+            PermissionManager.shared.requestMicrophonePermission { [weak self] status in
+                DispatchQueue.main.async {
+                    switch status {
+                    case .granted:
+                        self?.logger.info("麦克风权限已授予")
+                        completion(true)
+                    case .denied, .restricted:
+                        self?.logger.warning("麦克风权限被拒绝")
+                        self?.mainWindowView.updateStatus("麦克风权限被拒绝，请切换到系统音频模式")
+                        completion(false)
+                    case .notDetermined:
+                        self?.logger.warning("麦克风权限未确定")
+                        self?.mainWindowView.updateStatus("麦克风权限未确定，请重试")
+                        completion(false)
+                    }
+                }
             }
         } else {
             // 系统音频录制需要屏幕录制权限
-            logger.info("检查屏幕录制权限...")
-            mainWindowView.updateStatus("正在检查屏幕录制权限...")
+            logger.info("请求屏幕录制权限...")
+            mainWindowView.updateStatus("正在请求屏幕录制权限...")
             
-            // 录制阶段仅静默检查（异步），不触发系统弹窗，避免阻塞主线程
-            Task { [weak self] in
-                guard let self = self else { return }
-                let status = await PermissionManager.shared.checkScreenRecordingPermissionAsync()
-                await MainActor.run {
+            PermissionManager.shared.requestScreenRecordingPermission { [weak self] status in
+                DispatchQueue.main.async {
                     switch status {
                     case .granted:
-                        self.logger.info("屏幕录制权限已授予")
+                        self?.logger.info("屏幕录制权限已授予")
                         completion(true)
                     case .denied, .restricted:
-                        self.logger.warning("屏幕录制权限不足（录制阶段不弹窗）")
-                        self.mainWindowView.updateStatus("屏幕录制权限被拒绝，请点击权限设置按钮在系统设置中允许")
+                        self?.logger.warning("屏幕录制权限被拒绝")
+                        self?.mainWindowView.updateStatus("屏幕录制权限被拒绝，请点击权限设置按钮在系统设置中允许")
                         completion(false)
                     case .notDetermined:
-                        self.logger.info("屏幕录制权限未确定（录制阶段不弹窗）")
-                        self.mainWindowView.updateStatus("需要屏幕录制权限，请点击权限设置按钮")
+                        self?.logger.warning("屏幕录制权限未确定")
+                        self?.mainWindowView.updateStatus("需要屏幕录制权限，请点击权限设置按钮")
                         completion(false)
                     }
                 }
@@ -381,6 +395,9 @@ class MainViewController: NSViewController {
             return
         }
         
+        // 确保音频控制器已初始化
+        ensureAudioControllerInitialized()
+        
         logger.info("正在播放录音: \(fileURL.lastPathComponent)")
         logger.info("文件路径: \(fileURL.path)")
         do {
@@ -410,7 +427,7 @@ class MainViewController: NSViewController {
     private func stopPlayback() {
         logger.info("停止播放")
         stopPlaybackTimer()
-        audioRecorderController.stopPlayback()
+        audioRecorderController?.stopPlayback()
         mainWindowView.updateRecordingState(.idle)
     }
     
@@ -502,7 +519,11 @@ class MainViewController: NSViewController {
     // MARK: - Mode Management
     private func switchRecordingMode() {
         currentRecordingMode = currentRecordingMode == .microphone ? .systemAudio : .microphone
-        audioRecorderController.setRecordingMode(currentRecordingMode)
+        
+        // 确保音频控制器已初始化
+        ensureAudioControllerInitialized()
+        
+        audioRecorderController?.setRecordingMode(currentRecordingMode)
         mainWindowView.updateMode(currentRecordingMode)
         
         logger.info("录制模式已切换到: \(currentRecordingMode.rawValue)")
@@ -518,46 +539,34 @@ class MainViewController: NSViewController {
     private func checkMicrophonePermissionOnModeSwitch() {
         logger.info("检查麦克风权限（模式切换时）")
         
-        let permissions = AudioUtils.shared.checkAudioPermissions()
-        if !permissions.microphone {
-            logger.info("麦克风权限不足，请求权限...")
-            mainWindowView.updateStatus("需要麦克风权限，正在请求...")
-            
-            AudioUtils.shared.requestMicrophonePermission { [weak self] granted in
-                DispatchQueue.main.async {
-                    if granted {
-                        self?.logger.info("麦克风权限已授予")
-                        self?.mainWindowView.updateStatus("麦克风权限已授予，可以开始录制")
-                    } else {
-                        self?.logger.warning("麦克风权限被拒绝")
-                        self?.mainWindowView.updateStatus("麦克风权限被拒绝，请在系统设置中允许")
-                    }
-                }
-            }
-        } else {
+        let permissions = PermissionManager.shared.checkAllPermissions()
+        switch permissions.microphone {
+        case .granted:
             logger.info("麦克风权限已授予")
             mainWindowView.updateStatus("麦克风权限已授予，可以开始录制")
+        case .denied, .restricted:
+            logger.warning("麦克风权限被拒绝")
+            mainWindowView.updateStatus("麦克风权限被拒绝，开始录制时将重新请求")
+        case .notDetermined:
+            logger.info("麦克风权限未确定")
+            mainWindowView.updateStatus("麦克风权限未确定，开始录制时将请求权限")
         }
     }
 
     private func checkScreenRecordingPermissionOnModeSwitch() {
         logger.info("检查屏幕录制权限（模式切换时）")
-        mainWindowView.updateStatus("需要屏幕录制权限，正在请求...")
         
-        PermissionManager.shared.requestScreenRecordingPermission { [weak self] status in
-            DispatchQueue.main.async {
-                switch status {
-                case .granted:
-                    self?.logger.info("屏幕录制权限已授予")
-                    self?.mainWindowView.updateStatus("屏幕录制权限已授予，可以开始录制")
-                case .denied, .restricted:
-                    self?.logger.warning("屏幕录制权限被拒绝")
-                    self?.mainWindowView.updateStatus("屏幕录制权限被拒绝，请点击权限设置按钮在系统设置中允许")
-                case .notDetermined:
-                    self?.logger.info("屏幕录制权限未确定")
-                    self?.mainWindowView.updateStatus("需要屏幕录制权限，请点击权限设置按钮")
-                }
-            }
+        let permissions = PermissionManager.shared.checkAllPermissions()
+        switch permissions.screenRecording {
+        case .granted:
+            logger.info("屏幕录制权限已授予")
+            mainWindowView.updateStatus("屏幕录制权限已授予，可以开始录制")
+        case .denied, .restricted:
+            logger.warning("屏幕录制权限被拒绝")
+            mainWindowView.updateStatus("屏幕录制权限被拒绝，开始录制时将重新请求")
+        case .notDetermined:
+            logger.info("屏幕录制权限未确定")
+            mainWindowView.updateStatus("屏幕录制权限未确定，开始录制时将请求权限")
         }
     }
     
@@ -593,7 +602,11 @@ class MainViewController: NSViewController {
         
         if newFormat != currentFormat {
             currentFormat = newFormat
-            audioRecorderController.setAudioFormat(newFormat)
+            
+            // 确保音频控制器已初始化
+            ensureAudioControllerInitialized()
+            
+            audioRecorderController?.setAudioFormat(newFormat)
             logger.info("音频格式已更改为: \(newFormat.rawValue)")
         }
     }

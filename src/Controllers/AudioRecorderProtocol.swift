@@ -62,7 +62,7 @@ class BaseAudioRecorder: NSObject, AudioRecorderProtocol {
     init(mode: AudioUtils.RecordingMode) {
         self.recordingMode = mode
         super.init()
-        setupPlaybackEngine()
+        // 不在初始化时设置播放引擎，只在需要时设置
     }
     
     // MARK: - Abstract Methods (to be overridden)
@@ -163,6 +163,9 @@ class BaseAudioRecorder: NSObject, AudioRecorderProtocol {
         logger.info("文件路径: \(url.path)")
         logger.info("文件是否存在: \(fileManager.fileExists(at: url))")
         
+        // 确保播放引擎准备就绪
+        ensurePlaybackEngineReady()
+        
         stopPlayback()
         
         do {
@@ -175,11 +178,22 @@ class BaseAudioRecorder: NSObject, AudioRecorderProtocol {
             logger.info("音频时长: \(String(format: "%.2f", duration)) 秒")
             
             playbackFile = audioFile
+            
+            // 确保引擎停止后重新配置
+            if playbackEngine.isRunning {
+                playbackEngine.stop()
+            }
+            
+            // 重新配置播放节点
+            if playbackEngine.attachedNodes.contains(playbackPlayerNode) {
+                playbackEngine.detach(playbackPlayerNode)
+            }
+            
             playbackEngine.attach(playbackPlayerNode)
             playbackEngine.connect(playbackPlayerNode, to: playbackEngine.mainMixerNode, format: audioFile.processingFormat)
             
             try playbackEngine.start()
-            logger.info("播放引擎重新启动")
+            logger.info("播放引擎启动成功")
             
             installPlaybackLevelTap()
             
@@ -221,13 +235,9 @@ class BaseAudioRecorder: NSObject, AudioRecorderProtocol {
     }
     
     // MARK: - Private Methods
-    private func setupPlaybackEngine() {
-        do {
-            try playbackEngine.start()
-            logger.info("播放引擎启动成功")
-        } catch {
-            logger.error("播放引擎启动失败: \(error.localizedDescription)")
-        }
+    private func ensurePlaybackEngineReady() {
+        // 只在需要播放时才配置和启动引擎
+        logger.info("播放引擎按需准备")
     }
     
     private func installPlaybackLevelTap() {
