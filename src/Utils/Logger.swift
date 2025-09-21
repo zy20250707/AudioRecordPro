@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import os.log
 
 /// 日志级别枚举
@@ -44,6 +45,7 @@ class Logger {
     private let logQueue = DispatchQueue(label: "com.audiorecordmac.logger", qos: .utility)
     
     private var logDirectory: URL {
+        // 使用沙盒容器中的 Documents 目录
         let documentsPath = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
         return documentsPath.appendingPathComponent("AudioRecordings/Logs")
     }
@@ -56,16 +58,51 @@ class Logger {
     }
     
     private init() {
+        // 尝试恢复之前保存的安全作用域书签
+        restoreSecurityScopedBookmark()
         setupLogDirectory()
+    }
+    
+    private func restoreSecurityScopedBookmark() {
+        guard let bookmarkData = UserDefaults.standard.data(forKey: "documentsDirectoryBookmark") else {
+            return
+        }
+        
+        do {
+            var isStale = false
+            let url = try URL(
+                resolvingBookmarkData: bookmarkData,
+                options: .withSecurityScope,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+            
+            if isStale {
+                print("⚠️ 安全作用域书签已过期，需要重新授权")
+                return
+            }
+            
+            let success = url.startAccessingSecurityScopedResource()
+            if success {
+                print("✅ 安全作用域书签恢复成功")
+            } else {
+                print("❌ 安全作用域书签恢复失败")
+            }
+        } catch {
+            print("❌ 恢复安全作用域书签失败: \(error.localizedDescription)")
+        }
     }
     
     private func setupLogDirectory() {
         do {
             try fileManager.createDirectory(at: logDirectory, withIntermediateDirectories: true, attributes: nil)
+            print("✅ 日志目录创建成功: \(logDirectory.path)")
         } catch {
-            print("创建日志目录失败: \(error)")
+            print("❌ 创建日志目录失败: \(error.localizedDescription)")
+            print("   尝试的路径: \(logDirectory.path)")
         }
     }
+    
     
     /// 记录日志
     func log(_ level: LogLevel, _ message: String, file: String = #file, function: String = #function, line: Int = #line) {
@@ -73,8 +110,9 @@ class Logger {
         let timestamp = DateFormatter.logTimestamp.string(from: Date())
         let logMessage = "[\(timestamp)] \(level.emoji) [\(level.rawValue)] [\(fileName):\(line)] \(function): \(message)"
         
-        // 控制台输出
+        // 控制台输出（同时写入统一日志与stdout，便于CLI调试）
         os_log("%{public}@", log: osLog, type: level.osLogType, logMessage)
+        print(logMessage)
         
         // 文件输出
         logQueue.async { [weak self] in
@@ -101,6 +139,11 @@ class Logger {
     /// 获取日志文件路径
     func getLogFileURL() -> URL {
         return logFileURL
+    }
+    
+    /// 获取日志目录路径
+    func getLogDirectoryURL() -> URL {
+        return logDirectory
     }
     
     /// 清理旧日志文件（保留最近7天）

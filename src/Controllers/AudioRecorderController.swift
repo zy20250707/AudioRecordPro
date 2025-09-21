@@ -10,8 +10,9 @@ class AudioRecorderController: NSObject {
     
     // MARK: - Properties
     private var currentRecorder: AudioRecorderProtocol?
-    private var _recordingMode: AudioUtils.RecordingMode = .systemAudio
+    private var _recordingMode: AudioUtils.RecordingMode = .microphone
     private var _currentFormat: AudioUtils.AudioFormat = .m4a
+    private var _coreAudioTargetPID: pid_t?  // 保存CoreAudio目标PID
     private let logger = Logger.shared
     
     // MARK: - Public Interface (保持与原来相同)
@@ -72,6 +73,20 @@ class AudioRecorderController: NSObject {
         currentRecorder?.stopPlayback()
     }
     
+    /// 仅当当前录制器为 CoreAudio 方案时，设置目标 PID
+    func setCoreAudioTargetPID(_ pid: pid_t?) {
+        // 保存PID，即使当前录制器不是CoreAudio类型
+        _coreAudioTargetPID = pid
+        logger.info("CoreAudio 目标 PID 已保存为: \(pid.map { String($0) } ?? "nil")")
+        
+        if #available(macOS 14.4, *) {
+            if let core = currentRecorder as? CoreAudioProcessTapRecorder {
+                core.setTargetPID(pid)
+                logger.info("CoreAudio 目标 PID 已应用到当前录制器: \(pid.map { String($0) } ?? "nil")")
+            }
+        }
+    }
+    
     // MARK: - Private Methods
     private func setupRecorder() {
         guard !isRunning else {
@@ -86,19 +101,55 @@ class AudioRecorderController: NSObject {
             logger.info("创建麦克风录制器")
             newRecorder = MicrophoneRecorder(mode: .microphone)
             
-        case .systemAudio:
-            logger.info("创建系统音频录制器")
-            newRecorder = SystemAudioRecorder(mode: .systemAudio)
+        case .specificProcess:
+            if #available(macOS 14.4, *) {
+                logger.info("创建特定进程录制器（CoreAudio Process Tap）")
+                let coreRecorder = CoreAudioProcessTapRecorder(mode: .specificProcess)
+                // 应用保存的目标PID
+                if let savedPID = _coreAudioTargetPID {
+                    coreRecorder.setTargetPID(savedPID)
+                    logger.info("应用保存的目标PID到新录制器: \(savedPID)")
+                } else {
+                    logger.warning("⚠️ 未指定目标进程PID，无法进行特定进程录制")
+                    // 不允许没有选择就录制
+                    onStatus?("请先选择要录制的进程")
+                    return
+                }
+                newRecorder = coreRecorder
+            } else {
+                logger.warning("CoreAudio Process Tap 需要 macOS 14.4+，无法进行特定进程录制")
+                onStatus?("特定进程录制需要 macOS 14.4+")
+                return
+            }
+            
+        case .systemMixdown:
+            if #available(macOS 14.4, *) {
+                logger.info("创建系统混音录制器（CoreAudio Process Tap）")
+                let coreRecorder = CoreAudioProcessTapRecorder(mode: .systemMixdown)
+                // 系统混音不需要指定PID
+                coreRecorder.setTargetPID(nil)
+                newRecorder = coreRecorder
+            } else {
+                logger.warning("CoreAudio Process Tap 需要 macOS 14.4+，回退到系统音频录制器")
+                newRecorder = SystemAudioRecorder(mode: .systemMixdown)
+            }
         }
         
         newRecorder.setAudioFormat(_currentFormat)
-        newRecorder.onLevel = onLevel
+        newRecorder.onLevel = { [weak self] lvl in
+            self?.onLevel?(lvl)
+        }
         newRecorder.onStatus = onStatus
         newRecorder.onRecordingComplete = onRecordingComplete
         newRecorder.onPlaybackComplete = onPlaybackComplete
         
         currentRecorder = newRecorder
         logger.info("录制器已切换到: \(_recordingMode.displayName)")
+    }
+    
+    /// 获取当前的录制器（用于进程列表功能）
+    func getCurrentRecorder() -> AudioRecorderProtocol? {
+        return currentRecorder
     }
 }
 

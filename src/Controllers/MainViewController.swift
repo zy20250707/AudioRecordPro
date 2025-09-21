@@ -24,6 +24,11 @@ class MainViewController: NSViewController {
     private var playbackStartTime: Date?
     private var playbackDuration: TimeInterval = 0
     
+    // 进程列表相关
+    private var availableProcesses: [AudioProcessInfo] = []
+    private var selectedProcesses: Set<AudioProcessInfo> = []
+    private var selectedPIDs: [pid_t] = []
+    
     // MARK: - Lifecycle
     override func loadView() {
         mainWindowView = MainWindowView()
@@ -35,6 +40,8 @@ class MainViewController: NSViewController {
         super.viewDidLoad()
         logger.info("主视图控制器开始加载")
         setupInitialState()
+        // 关闭启动时的权限监控与静默检查，避免任何权限链路阻塞 UI
+        // checkAudioPermissionsSilently()
         logger.info("主视图控制器已加载")
     }
     
@@ -110,6 +117,9 @@ class MainViewController: NSViewController {
         mainWindowView.updateRecordingState(.idle)
         mainWindowView.updateStatus("准备就绪")
         
+        // 加载可用进程列表
+        loadAvailableProcesses()
+        
         // 清理旧日志
         logger.cleanupOldLogs()
         
@@ -182,11 +192,12 @@ class MainViewController: NSViewController {
     }
     
     private func startPermissionMonitoring() {
-        PermissionManager.shared.startPermissionMonitoring { [weak self] type, status in
-            DispatchQueue.main.async {
-                self?.handlePermissionStatusChange(type: type, status: status)
-            }
-        }
+        // 注释掉权限监控，避免后台持续触发权限检查
+        // PermissionManager.shared.startPermissionMonitoring { [weak self] type, status in
+        //     DispatchQueue.main.async {
+        //         self?.handlePermissionStatusChange(type: type, status: status)
+        //     }
+        // }
     }
     
     private func handlePermissionStatusChange(type: PermissionManager.PermissionType, status: PermissionManager.PermissionStatus) {
@@ -213,13 +224,21 @@ class MainViewController: NSViewController {
             switch status {
             case .granted:
                 logger.info("屏幕录制权限已授予")
-                if currentRecordingMode == .systemAudio {
-                    mainWindowView.updateStatus("屏幕录制权限已授予，可以开始录制")
-                }
+                // 屏幕录制权限相关代码已移除
             case .denied:
                 logger.warning("屏幕录制权限被拒绝")
-                if currentRecordingMode == .systemAudio {
-                    mainWindowView.updateStatus("屏幕录制权限被拒绝，请在系统设置中允许")
+                // 屏幕录制权限相关代码已移除
+            default:
+                break
+            }
+        case .systemAudioCapture:
+            switch status {
+            case .granted:
+                logger.info("系统音频捕获权限已授予")
+            case .denied:
+                logger.warning("系统音频捕获权限被拒绝")
+                if currentRecordingMode == .specificProcess || currentRecordingMode == .systemMixdown {
+                    mainWindowView.updateStatus("系统音频捕获权限被拒绝，请点击允许或在设置中开启")
                 }
             default:
                 break
@@ -233,42 +252,71 @@ class MainViewController: NSViewController {
             logger.warning("录制已在进行中")
             return
         }
-        
         // 确保音频控制器已初始化
         ensureAudioControllerInitialized()
-        
         logger.info("开始录制，模式: \(currentRecordingMode.rawValue)")
         
-        // 检查权限
-        checkPermissionsBeforeRecording { [weak self] hasPermission in
+        // 根据左侧选择动态确定录制源
+        let wantMic = mainWindowView.isMicrophoneSourceSelected()
+        let wantSystemMixdown = mainWindowView.isSystemAudioSourceSelected()
+        let wantSpecificProcess = !selectedPIDs.isEmpty
+        
+        // 检查是否有任何选择
+        guard wantMic || wantSystemMixdown || wantSpecificProcess else {
+            mainWindowView.updateStatus("请先选择录制源：麦克风、系统混音或特定进程")
+            return
+        }
+        
+        // 确定录制模式
+        if wantMic {
+            currentRecordingMode = .microphone
+            audioRecorderController?.setRecordingMode(.microphone)
+            mainWindowView.updateStatus("麦克风准备中…")
+        } else if wantSpecificProcess {
+            currentRecordingMode = .specificProcess
+            audioRecorderController?.setRecordingMode(.specificProcess)
+            audioRecorderController?.setCoreAudioTargetPID(selectedPIDs.first)
+            mainWindowView.updateStatus("特定进程录制准备中…")
+        } else if wantSystemMixdown {
+            currentRecordingMode = .systemMixdown
+            audioRecorderController?.setRecordingMode(.systemMixdown)
+            mainWindowView.updateStatus("系统混音准备中…")
+        }
+        
+        checkPermissionsBeforeRecording { [weak self] granted in
             guard let self = self else { return }
-            
-            if !hasPermission {
-                self.logger.warning("录制被阻止：缺少权限")
+            guard granted else {
+                self.logger.warning("权限未通过，取消录制")
+                self.handleRecordingFailure()
                 return
             }
-            
-            // 权限检查通过，开始录制
+            // 录制前主动请求系统音频捕获权限（TCC）
+            if self.currentRecordingMode == .specificProcess || self.currentRecordingMode == .systemMixdown {
+                PermissionManager.shared.requestSystemAudioCapturePermission { status in
+                    // 无论结果如何，继续尝试启动，系统也会再次弹窗
+                }
+            }
             self.isRecording = true
             self.recordingStartTime = Date()
-            
             self.mainWindowView.updateRecordingState(.preparing)
-            self.mainWindowView.updateStatus("准备录制 \(self.currentRecordingMode.displayName)…")
-            
-            self.audioRecorderController?.startRecording()
+            self.mainWindowView.updateStatus("准备录制…")
             self.startTimer()
             
-            // 延迟更新为录制状态
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                if self.isRecording {
-                    self.mainWindowView.updateRecordingState(.recording)
-                }
+            // 启动底层录制
+            self.audioRecorderController.setRecordingMode(self.currentRecordingMode)
+            self.audioRecorderController.setAudioFormat(self.currentFormat)
+            self.audioRecorderController.startRecording()
+            
+            // 视觉上进入录制态
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                if self.isRecording { self.mainWindowView.updateRecordingState(.recording) }
             }
         }
     }
     
     private func checkPermissionsBeforeRecording(completion: @escaping (Bool) -> Void) {
-        if currentRecordingMode == .microphone {
+        switch currentRecordingMode {
+        case .microphone:
             // 请求麦克风权限
             logger.info("请求麦克风权限...")
             mainWindowView.updateStatus("正在请求麦克风权限...")
@@ -290,28 +338,11 @@ class MainViewController: NSViewController {
                     }
                 }
             }
-        } else {
-            // 系统音频录制需要屏幕录制权限
-            logger.info("请求屏幕录制权限...")
-            mainWindowView.updateStatus("正在请求屏幕录制权限...")
-            
-            PermissionManager.shared.requestScreenRecordingPermission { [weak self] status in
-                DispatchQueue.main.async {
-                    switch status {
-                    case .granted:
-                        self?.logger.info("屏幕录制权限已授予")
-                        completion(true)
-                    case .denied, .restricted:
-                        self?.logger.warning("屏幕录制权限被拒绝")
-                        self?.mainWindowView.updateStatus("屏幕录制权限被拒绝，请点击权限设置按钮在系统设置中允许")
-                        completion(false)
-                    case .notDetermined:
-                        self?.logger.warning("屏幕录制权限未确定")
-                        self?.mainWindowView.updateStatus("需要屏幕录制权限，请点击权限设置按钮")
-                        completion(false)
-                    }
-                }
-            }
+        case .specificProcess, .systemMixdown:
+            // CoreAudio 方案不需要额外权限，直接放行（系统会在首次真正使用时提示系统音频捕获权限）
+            logger.info("CoreAudio 模式：不需要额外权限，直接开始")
+            DispatchQueue.main.async { completion(true) }
+        
         }
     }
     
@@ -331,7 +362,7 @@ class MainViewController: NSViewController {
         // 停止计时器
         stopTimer()
         
-        // 停止录制
+        // 停止底层录制
         audioRecorderController.stopRecording()
         
         logger.info("录制已停止")
@@ -469,13 +500,8 @@ class MainViewController: NSViewController {
     
     // MARK: - Recording Mode Management
     private func loadLastRecordingMode() {
-        if let savedModeString = userDefaults.string(forKey: recordingModeKey),
-           let savedMode = AudioUtils.RecordingMode(rawValue: savedModeString) {
-            currentRecordingMode = savedMode
-            logger.info("已加载上次的录制模式: \(savedMode.rawValue)")
-        } else {
-            logger.info("使用默认录制模式: \(currentRecordingMode.rawValue)")
-        }
+        // 不记录之前的选择，每次启动都使用默认模式
+        logger.info("使用默认录制模式: \(currentRecordingMode.rawValue)")
     }
     
     private func saveRecordingMode(_ mode: AudioUtils.RecordingMode) {
@@ -518,7 +544,15 @@ class MainViewController: NSViewController {
     
     // MARK: - Mode Management
     private func switchRecordingMode() {
-        currentRecordingMode = currentRecordingMode == .microphone ? .systemAudio : .microphone
+        // 三态循环：microphone -> specificProcess -> systemMixdown -> microphone
+        switch currentRecordingMode {
+        case .microphone:
+            currentRecordingMode = .specificProcess
+        case .specificProcess:
+            currentRecordingMode = .systemMixdown
+        case .systemMixdown:
+            currentRecordingMode = .microphone
+        }
         
         // 确保音频控制器已初始化
         ensureAudioControllerInitialized()
@@ -528,11 +562,23 @@ class MainViewController: NSViewController {
         
         logger.info("录制模式已切换到: \(currentRecordingMode.rawValue)")
         
-        // 如果切换到麦克风模式，检查权限
-        if currentRecordingMode == .microphone {
+        // 根据模式提示/检查权限
+        switch currentRecordingMode {
+        case .microphone:
             checkMicrophonePermissionOnModeSwitch()
-        } else {
-            checkScreenRecordingPermissionOnModeSwitch()
+        case .specificProcess:
+            // 特定进程录制需要 NSAudioCaptureUsageDescription（已在 Info.plist）
+            mainWindowView.updateStatus("特定进程录制：需要系统音频捕获权限，开始录制时会提示授权")
+            // 模式切到特定进程录制时，同步一次当前选择（若有）
+            if let pid = selectedPIDs.first {
+                audioRecorderController?.setCoreAudioTargetPID(pid)
+            } else {
+                audioRecorderController?.setCoreAudioTargetPID(nil)
+            }
+        case .systemMixdown:
+            // 系统混音录制需要 NSAudioCaptureUsageDescription（已在 Info.plist）
+            mainWindowView.updateStatus("系统混音录制：需要系统音频捕获权限，开始录制时会提示授权")
+        
         }
     }
     
@@ -574,9 +620,9 @@ class MainViewController: NSViewController {
     private func simulateButtonClick() {
         logger.info("🤖 开始模拟按钮点击测试...")
         
-        // 方法1: 直接调用按钮的action
-        logger.info("方法1: 直接调用按钮action")
-        mainWindowView.perform(#selector(MainWindowView.modeSwitchButtonClicked))
+        // 方法1: 直接调用按钮的action（最小化版本暂时注释）
+        logger.info("方法1: 直接调用按钮action - 跳过（最小化版本）")
+        // mainWindowView.perform(#selector(MainWindowView.modeSwitchButtonClicked))
         
         // 方法2: 直接调用delegate方法
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -651,6 +697,75 @@ extension MainViewController: MainWindowViewDelegate {
         stopPlayback()
     }
     
+    func mainWindowViewDidSelectProcesses(_ view: MainWindowView, pids: [pid_t]) {
+        selectedPIDs = pids
+        
+        // 不保存选择状态，每次启动都完全重置
+        
+        // 如果当前是特定进程录制模式，立即刷新目标 PID（取首个）
+        if currentRecordingMode == .specificProcess {
+            ensureAudioControllerInitialized()
+            audioRecorderController?.setCoreAudioTargetPID(pids.first)
+            if let first = pids.first {
+                mainWindowView.updateStatus("已选择进程 PID=\(first)")
+            } else {
+                mainWindowView.updateStatus("已清空进程选择，默认录制系统混音")
+            }
+        }
+    }
+    
+    func mainWindowViewDidRequestProcessRefresh(_ view: MainWindowView) {
+        refreshProcessList()
+    }
+    
+    private func refreshProcessList() {
+        logger.info("🔄 刷新进程列表...")
+        mainWindowView.updateStatus("正在刷新进程列表...")
+        
+        // 在后台线程刷新进程列表
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            
+            if #available(macOS 14.4, *) {
+                let coreAudioRecorder = CoreAudioProcessTapRecorder(mode: .systemMixdown)
+                let processes = coreAudioRecorder.getAvailableAudioProcesses()
+                
+                DispatchQueue.main.async {
+                    self.mainWindowView.updateProcessList(processes)
+                    self.logger.info("✅ 进程列表刷新完成，发现 \(processes.count) 个进程")
+                    self.mainWindowView.updateStatus("进程列表已刷新，发现 \(processes.count) 个进程")
+                    
+                    // 不恢复上次的选择状态，完全重置
+                    self.logger.info("📝 进程列表刷新完成，完全重置状态")
+                }
+            } else {
+                DispatchQueue.main.async {
+                    self.mainWindowView.updateStatus("当前系统不支持 CoreAudio Process Tap")
+                }
+            }
+        }
+    }
+    
+    // MARK: - Process Selection Persistence
+
+    func mainWindowViewDidRequestMode(_ view: MainWindowView, mode: AudioUtils.RecordingMode) {
+        ensureAudioControllerInitialized()
+        if currentRecordingMode != mode {
+            currentRecordingMode = mode
+            audioRecorderController?.setRecordingMode(mode)
+            mainWindowView.updateMode(mode)
+            saveRecordingMode(mode)
+            switch mode {
+            case .specificProcess:
+                mainWindowView.updateStatus("特定进程录制模式：录制选中的进程")
+            case .systemMixdown:
+                mainWindowView.updateStatus("系统混音录制模式：录制系统所有音频输出")
+            case .microphone:
+                mainWindowView.updateStatus("麦克风模式已选中")
+            }
+        }
+    }
+    
     private func openSystemPreferences() {
         logger.info("打开系统偏好设置")
         PermissionManager.shared.openSystemPreferences()
@@ -662,5 +777,29 @@ extension MainViewController: MainWindowViewDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             self.checkAudioPermissions()
         }
+    }
+    
+    /// 加载可用的音频进程列表
+    private func loadAvailableProcesses() {
+        logger.info("开始加载可用音频进程列表")
+        
+        // 在主线程获取，避免 MainActor 隔离告警
+        ensureAudioControllerInitialized()
+        
+        let processes: [AudioProcessInfo]
+        if #available(macOS 14.4, *) {
+            let lister = CoreAudioProcessTapRecorder(mode: .systemMixdown)
+            processes = lister.getAvailableAudioProcesses()
+        } else {
+            logger.warning("CoreAudio Process Tap 需要 macOS 14.4+，无法加载进程列表")
+            processes = []
+        }
+        
+        self.availableProcesses = processes
+        self.mainWindowView.updateProcessList(processes)
+        self.logger.info("已加载 \(processes.count) 个可用音频进程")
+        
+        // 不恢复上次的选择状态，完全重置
+        logger.info("📝 完全重置状态，不恢复上次选择")
     }
 }

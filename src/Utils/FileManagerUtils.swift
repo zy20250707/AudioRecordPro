@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 /// 文件管理工具类
 class FileManagerUtils {
@@ -7,16 +8,17 @@ class FileManagerUtils {
     private let fileManager = FileManager.default
     private let logger = Logger.shared
     
-    private init() {}
+    private init() {
+        // 尝试恢复之前保存的安全作用域书签
+        _ = restoreSecurityScopedBookmark()
+    }
     
     /// 获取录音文件保存目录
     func getRecordingsDirectory() -> URL {
+        // 直接使用 Documents 目录
         let documentsPath = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
         let recordingsDir = documentsPath.appendingPathComponent("AudioRecordings")
-        
-        // 确保目录存在
         createDirectoryIfNeeded(at: recordingsDir)
-        
         return recordingsDir
     }
     
@@ -42,6 +44,87 @@ class FileManagerUtils {
         let directory = getRecordingsDirectory()
         let filename = generateRecordingFileName(format: format)
         return directory.appendingPathComponent(filename)
+    }
+    
+    /// 请求 Documents 目录访问权限
+    func requestDocumentsAccess(completion: @escaping (Bool) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "授权访问"
+        panel.message = "请选择 Documents 目录以授权应用程序访问"
+        panel.title = "授权 Documents 目录访问"
+        
+        // 默认导航到 Documents 目录
+        if let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first {
+            panel.directoryURL = documentsURL
+        }
+        
+        panel.begin { response in
+            if response == .OK, let selectedURL = panel.url {
+                // 检查是否选择了 Documents 目录
+                if self.isDocumentsDirectory(selectedURL) {
+                    // 保存安全作用域书签
+                    self.saveSecurityScopedBookmark(for: selectedURL)
+                    completion(true)
+                } else {
+                    // 用户选择了其他目录，也保存书签
+                    self.saveSecurityScopedBookmark(for: selectedURL)
+                    completion(true)
+                }
+            } else {
+                completion(false)
+            }
+        }
+    }
+    
+    /// 检查是否为 Documents 目录
+    private func isDocumentsDirectory(_ url: URL) -> Bool {
+        guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return false
+        }
+        return url.path == documentsURL.path
+    }
+    
+    /// 保存安全作用域书签
+    private func saveSecurityScopedBookmark(for url: URL) {
+        do {
+            let bookmarkData = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+            UserDefaults.standard.set(bookmarkData, forKey: "selectedDirectoryBookmark")
+            logger.info("已保存安全作用域书签: \(url.path)")
+        } catch {
+            logger.error("保存安全作用域书签失败: \(error.localizedDescription)")
+        }
+    }
+    
+    /// 恢复安全作用域书签
+    func restoreSecurityScopedBookmark() -> URL? {
+        guard let bookmarkData = UserDefaults.standard.data(forKey: "selectedDirectoryBookmark") else {
+            return nil
+        }
+        
+        do {
+            var isStale = false
+            let url = try URL(resolvingBookmarkData: bookmarkData, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &isStale)
+            
+            if isStale {
+                logger.warning("安全作用域书签已过期，需要重新选择目录")
+                return nil
+            }
+            
+            let success = url.startAccessingSecurityScopedResource()
+            if success {
+                logger.info("已恢复安全作用域书签: \(url.path)")
+                return url
+            } else {
+                logger.error("无法访问安全作用域资源")
+                return nil
+            }
+        } catch {
+            logger.error("恢复安全作用域书签失败: \(error.localizedDescription)")
+            return nil
+        }
     }
     
     /// 检查文件是否存在

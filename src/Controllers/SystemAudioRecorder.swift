@@ -18,7 +18,7 @@ class SystemAudioRecorder: BaseAudioRecorder {
     
     // MARK: - Initialization
     override init(mode: AudioUtils.RecordingMode) {
-        super.init(mode: .systemAudio)
+        super.init(mode: .systemMixdown)
     }
     
     // MARK: - Recording Implementation

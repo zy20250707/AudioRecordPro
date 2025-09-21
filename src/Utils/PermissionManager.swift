@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import ScreenCaptureKit
 import AVFoundation
+import Darwin
 
 /// 权限管理器
 class PermissionManager {
@@ -24,16 +25,18 @@ class PermissionManager {
     enum PermissionType {
         case microphone
         case screenRecording
+        case systemAudioCapture
     }
     
     /// 检查所有权限状态
-    func checkAllPermissions() -> (microphone: PermissionStatus, screenRecording: PermissionStatus) {
+    func checkAllPermissions() -> (microphone: PermissionStatus, screenRecording: PermissionStatus, systemAudioCapture: PermissionStatus) {
         let microphoneStatus = checkMicrophonePermission()
         let screenRecordingStatus = checkScreenRecordingPermission()
+        let systemAudioCaptureStatus = checkSystemAudioCapturePermission()
         
-        logger.info("权限检查结果 - 麦克风: \(microphoneStatus), 屏幕录制: \(screenRecordingStatus)")
+        logger.info("权限检查结果 - 麦克风: \(microphoneStatus), 屏幕录制: \(screenRecordingStatus), 系统音频捕获: \(systemAudioCaptureStatus)")
         
-        return (microphoneStatus, screenRecordingStatus)
+        return (microphoneStatus, screenRecordingStatus, systemAudioCaptureStatus)
     }
     
     /// 检查麦克风权限
@@ -54,6 +57,61 @@ class PermissionManager {
         }
     }
     
+    // MARK: - System Audio Capture (TCC SPI)
+    private static let tccPath = "/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC"
+    private static let tccHandle: UnsafeMutableRawPointer? = {
+        let handle = dlopen(tccPath, RTLD_NOW)
+        return handle
+    }()
+    private typealias PreflightFuncType = @convention(c) (CFString, CFDictionary?) -> Int
+    private typealias RequestFuncType = @convention(c) (CFString, CFDictionary?, @escaping (Bool) -> Void) -> Void
+    private static let tccPreflight: PreflightFuncType? = {
+        guard let handle = tccHandle, let sym = dlsym(handle, "TCCAccessPreflight") else { return nil }
+        return unsafeBitCast(sym, to: PreflightFuncType.self)
+    }()
+    private static let tccRequest: RequestFuncType? = {
+        guard let handle = tccHandle, let sym = dlsym(handle, "TCCAccessRequest") else { return nil }
+        return unsafeBitCast(sym, to: RequestFuncType.self)
+    }()
+    private let tccServiceAudioCapture: CFString = "kTCCServiceAudioCapture" as CFString
+
+    /// 检查系统音频捕获权限
+    private func checkSystemAudioCapturePermission() -> PermissionStatus {
+        return preflightSystemAudioCapture()
+    }
+    
+    private func preflightSystemAudioCapture() -> PermissionStatus {
+        guard let preflight = PermissionManager.tccPreflight else { return .notDetermined }
+        let result = preflight(tccServiceAudioCapture, nil)
+        if result == 0 { return .granted }
+        if result == 1 { return .denied }
+        return .notDetermined
+    }
+    
+    func requestSystemAudioCapturePermission(completion: @escaping (PermissionStatus) -> Void) {
+        // 先静默查询
+        let status = preflightSystemAudioCapture()
+        switch status {
+        case .granted, .denied:
+            completion(status)
+            return
+        case .notDetermined, .restricted:
+            break
+        }
+        guard let request = PermissionManager.tccRequest else {
+            completion(.notDetermined)
+            return
+        }
+        logger.info("请求系统音频捕获权限（TCC）…")
+        request(tccServiceAudioCapture, nil) { [weak self] granted in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                self.logger.info("系统音频捕获权限结果: \(granted)")
+                completion(granted ? .granted : .denied)
+            }
+        }
+    }
+
     /// 检查屏幕录制权限（静默检查，不触发系统对话框）
     private func checkScreenRecordingPermission() -> PermissionStatus {
         // 使用最近一次异步检测的缓存或保守返回 .notDetermined
@@ -201,6 +259,12 @@ class PermissionManager {
             2. 选择左侧的"屏幕录制"
             3. 勾选"音频录制工具"应用
             4. 重启应用程序以生效
+            """
+        case .systemAudioCapture:
+            return """
+            系统音频捕获权限设置：
+            1. 当系统弹出“允许录制系统音频”对话框时，点击“允许”
+            2. 如被拒绝，可重启应用再次触发或在‘隐私’中重置权限
             """
         }
     }

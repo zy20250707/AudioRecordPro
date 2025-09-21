@@ -29,7 +29,6 @@ protocol AudioRecorderProtocol: AnyObject {
 }
 
 /// 音频录制器基础类
-@MainActor
 class BaseAudioRecorder: NSObject, AudioRecorderProtocol {
     
     // MARK: - Properties
@@ -57,6 +56,27 @@ class BaseAudioRecorder: NSObject, AudioRecorderProtocol {
     var onStatus: ((String) -> Void)?
     var onRecordingComplete: ((AudioRecording) -> Void)?
     var onPlaybackComplete: (() -> Void)?
+    
+    // MARK: - Main Thread Callback Helpers
+    @MainActor
+    func callOnStatus(_ message: String) {
+        onStatus?(message)
+    }
+    
+    @MainActor
+    func callOnLevel(_ level: Float) {
+        onLevel?(level)
+    }
+    
+    @MainActor
+    func callOnRecordingComplete(_ recording: AudioRecording) {
+        onRecordingComplete?(recording)
+    }
+    
+    @MainActor
+    func callOnPlaybackComplete() {
+        onPlaybackComplete?()
+    }
     
     // MARK: - Initialization
     init(mode: AudioUtils.RecordingMode) {
@@ -108,6 +128,87 @@ class BaseAudioRecorder: NSObject, AudioRecorderProtocol {
         logger.info("文件格式: \(audioFile?.processingFormat.settings ?? [:])")
     }
     
+    /// 创建音频文件（支持沙盒环境）
+    func createAudioFileWithSandboxSupport(format: AudioUtils.AudioFormat, completion: @escaping (Result<URL, Error>) -> Void) {
+        // 首先尝试使用默认目录
+        let defaultURL = fileManager.getRecordingFileURL(format: format.fileExtension)
+        
+        do {
+            try createAudioFile(at: defaultURL, format: format)
+            completion(.success(defaultURL))
+        } catch {
+            logger.warning("无法在默认目录创建文件，请求 Documents 目录访问权限: \(error.localizedDescription)")
+            
+            // 如果默认目录失败，请求 Documents 目录访问权限
+            fileManager.requestDocumentsAccess { [weak self] granted in
+                guard let self = self else { return }
+                
+                if granted {
+                    // 重新尝试创建文件
+                    do {
+                        try self.createAudioFile(at: defaultURL, format: format)
+                        completion(.success(defaultURL))
+                    } catch {
+                        completion(.failure(error))
+                    }
+                } else {
+                    completion(.failure(NSError(domain: "AudioRecorder", code: -1, userInfo: [NSLocalizedDescriptionKey: "用户拒绝了 Documents 目录访问权限"])))
+                }
+            }
+        }
+    }
+    
+    /// 创建音频文件（支持沙盒环境，使用自定义设置）
+    func createAudioFileWithSandboxSupportAndSettings(settings: [String: Any], completion: @escaping (Result<URL, Error>) -> Void) {
+        // 生成文件名（使用PCM格式）
+        let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let fileName = "record_\(timestamp).wav"
+        let defaultURL = fileManager.getRecordingFileURL(format: "wav")
+        
+        do {
+            // 强制使用标准PCM格式，避免Apple的FLLR块
+            var standardSettings = settings
+            standardSettings[AVFormatIDKey] = kAudioFormatLinearPCM
+            standardSettings[AVLinearPCMIsNonInterleaved] = false  // 强制交错格式
+            
+            // 使用标准格式创建，确保兼容性
+            let standardFormat = AVAudioFormat(standardFormatWithSampleRate: standardSettings[AVSampleRateKey] as! Double, channels: standardSettings[AVNumberOfChannelsKey] as! AVAudioChannelCount)!
+            audioFile = try AVAudioFile(forWriting: defaultURL, settings: standardSettings, commonFormat: standardFormat.commonFormat, interleaved: true)
+            outputURL = defaultURL
+            
+            onStatus?("文件创建成功: \(fileName)")
+            logger.info("音频文件创建成功: \(fileName)")
+            logger.info("文件格式: \(settings)")
+            completion(.success(defaultURL))
+        } catch {
+            logger.warning("无法在默认目录创建文件，请求 Documents 目录访问权限: \(error.localizedDescription)")
+            
+            // 如果默认目录失败，请求 Documents 目录访问权限
+            fileManager.requestDocumentsAccess { [weak self] granted in
+                guard let self = self else { return }
+                
+                if granted {
+                    // 重新尝试创建文件
+                    do {
+                        self.audioFile = try AVAudioFile(forWriting: defaultURL, settings: settings)
+                        self.outputURL = defaultURL
+                        
+                        self.onStatus?("文件创建成功: \(fileName)")
+                        self.logger.info("音频文件创建成功: \(fileName)")
+                        self.logger.info("文件格式: \(settings)")
+                        completion(.success(defaultURL))
+                    } catch {
+                        self.logger.error("重新创建文件失败: \(error.localizedDescription)")
+                        completion(.failure(error))
+                    }
+                } else {
+                    self.logger.error("Documents 目录访问权限被拒绝")
+                    completion(.failure(NSError(domain: "AudioRecorder", code: -1, userInfo: [NSLocalizedDescriptionKey: "Documents 目录访问权限被拒绝"])))
+                }
+            }
+        }
+    }
+    
     func calculateRMSLevel(from buffer: AVAudioPCMBuffer) -> Float {
         guard let channelData = buffer.floatChannelData?[0] else { return 0.0 }
         let frameCount = Int(buffer.frameLength)
@@ -122,7 +223,9 @@ class BaseAudioRecorder: NSObject, AudioRecorderProtocol {
         }
         
         let rms = sqrt(sum / Float(frameCount))
-        let level = min(1.0, rms * 20.0) // Scale up for better visualization
+        // 适中灵敏度：放大约×30；不设置地板，交由视图的噪声门处理
+        let scaled = rms * 30.0
+        let level = max(0.0, min(1.0, scaled))
         return level
     }
     
@@ -169,6 +272,7 @@ class BaseAudioRecorder: NSObject, AudioRecorderProtocol {
         stopPlayback()
         
         do {
+            // 先尝试自动检测文件格式
             let audioFile = try AVAudioFile(forReading: url)
             logger.info("播放文件创建成功")
             logger.info("音频时长: \(audioFile.length) 帧")
@@ -176,6 +280,47 @@ class BaseAudioRecorder: NSObject, AudioRecorderProtocol {
             
             let duration = Double(audioFile.length) / audioFile.processingFormat.sampleRate
             logger.info("音频时长: \(String(format: "%.2f", duration)) 秒")
+            
+            // 如果时长为0，尝试使用不同的格式重新读取
+            if duration == 0.0 {
+                logger.warning("检测到音频时长为0，尝试使用不同格式重新读取")
+                
+                // 尝试非交错格式
+                let nonInterleavedFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 44100, channels: 2, interleaved: false)
+                if let nonInterleavedFormat = nonInterleavedFormat {
+                    do {
+                        let retryAudioFile = try AVAudioFile(forReading: url, commonFormat: nonInterleavedFormat.commonFormat, interleaved: nonInterleavedFormat.isInterleaved)
+                        let retryDuration = Double(retryAudioFile.length) / retryAudioFile.processingFormat.sampleRate
+                        logger.info("使用非交错格式重新读取成功，时长: \(String(format: "%.2f", retryDuration)) 秒")
+                        
+                        if retryDuration > 0.0 {
+                            // 使用重新读取的文件
+                            playbackFile = retryAudioFile
+                            return
+                        }
+                    } catch {
+                        logger.warning("使用非交错格式重新读取失败: \(error.localizedDescription)")
+                    }
+                }
+                
+                // 尝试交错格式
+                let interleavedFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 44100, channels: 2, interleaved: true)
+                if let interleavedFormat = interleavedFormat {
+                    do {
+                        let retryAudioFile = try AVAudioFile(forReading: url, commonFormat: interleavedFormat.commonFormat, interleaved: interleavedFormat.isInterleaved)
+                        let retryDuration = Double(retryAudioFile.length) / retryAudioFile.processingFormat.sampleRate
+                        logger.info("使用交错格式重新读取成功，时长: \(String(format: "%.2f", retryDuration)) 秒")
+                        
+                        if retryDuration > 0.0 {
+                            // 使用重新读取的文件
+                            playbackFile = retryAudioFile
+                            return
+                        }
+                    } catch {
+                        logger.warning("使用交错格式重新读取失败: \(error.localizedDescription)")
+                    }
+                }
+            }
             
             playbackFile = audioFile
             
@@ -212,7 +357,9 @@ class BaseAudioRecorder: NSObject, AudioRecorderProtocol {
             
         } catch {
             let errorMsg = "播放失败: \(error.localizedDescription)"
-            onStatus?(errorMsg)
+            Task { @MainActor in
+                self.callOnStatus(errorMsg)
+            }
             logger.error("播放失败: \(error.localizedDescription)")
         }
     }

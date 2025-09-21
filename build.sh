@@ -26,6 +26,8 @@ swiftc \
   -framework AppKit \
   -framework AVFoundation \
   -framework Accelerate \
+  -framework CoreAudio \
+  -framework AudioToolbox \
   -framework ScreenCaptureKit \
   -o "$MACOS_DIR/$APP_NAME" \
   "$STAGE_DIR/src/main.swift" \
@@ -36,10 +38,19 @@ swiftc \
   "$STAGE_DIR/src/Utils/PermissionManager.swift" \
   "$STAGE_DIR/src/Models/AudioRecording.swift" \
   "$STAGE_DIR/src/Views/LevelMeterView.swift" \
+  "$STAGE_DIR/src/Views/SidebarView.swift" \
+  "$STAGE_DIR/src/Views/TracksView.swift" \
+  "$STAGE_DIR/src/Views/ControlPanelView.swift" \
+  "$STAGE_DIR/src/Views/StatusBarView.swift" \
   "$STAGE_DIR/src/Views/MainWindowView.swift" \
   "$STAGE_DIR/src/Controllers/AudioRecorderProtocol.swift" \
   "$STAGE_DIR/src/Controllers/MicrophoneRecorder.swift" \
   "$STAGE_DIR/src/Controllers/SystemAudioRecorder.swift" \
+  "$STAGE_DIR/src/Controllers/AudioProcessEnumerator.swift" \
+  "$STAGE_DIR/src/Controllers/ProcessTapManager.swift" \
+  "$STAGE_DIR/src/Controllers/AggregateDeviceManager.swift" \
+  "$STAGE_DIR/src/Controllers/AudioCallbackHandler.swift" \
+  "$STAGE_DIR/src/Controllers/CoreAudioProcessTapRecorder.swift" \
   "$STAGE_DIR/src/Controllers/AudioRecorderController.swift" \
   "$STAGE_DIR/src/Controllers/MainViewController.swift" \
   "$STAGE_DIR/src/Controllers/AppDelegate.swift"
@@ -80,8 +91,16 @@ if [ -f "$ICON_SRC" ]; then
 fi
 
 echo "[3.5/4] 代码签名..."
-# 使用 ad-hoc 签名，这样系统会认为这是同一个应用
-codesign --force --sign - "$APP_DIR"
+# 使用 entitlements 进行签名（若存在），否则退回 ad-hoc
+ENTITLEMENTS_PLIST="$ROOT_DIR/AudioRecordMac.entitlements"
+if [ -f "$ENTITLEMENTS_PLIST" ]; then
+  echo "使用 entitlements 签名可执行文件与 .app"
+  codesign --force --entitlements "$ENTITLEMENTS_PLIST" --options runtime --sign - "$MACOS_DIR/$APP_NAME"
+  codesign --force --entitlements "$ENTITLEMENTS_PLIST" --options runtime --sign - "$APP_DIR"
+else
+  echo "未找到 entitlements，使用 ad-hoc 签名"
+  codesign --force --sign - "$APP_DIR"
+fi
 
 echo "[4/4] 完成，应用位于: $APP_DIR"
 echo "运行: open \"$APP_DIR\""

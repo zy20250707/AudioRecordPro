@@ -49,14 +49,17 @@ class AudioUtils {
     /// 录音模式枚举
     enum RecordingMode: String, CaseIterable {
         case microphone = "microphone"
-        case systemAudio = "systemAudio"
+        case specificProcess = "specificProcess"
+        case systemMixdown = "systemMixdown"
         
         var displayName: String {
             switch self {
             case .microphone:
                 return "麦克风"
-            case .systemAudio:
-                return "系统声音"
+            case .specificProcess:
+                return "特定进程"
+            case .systemMixdown:
+                return "系统混音"
             }
         }
         
@@ -64,8 +67,10 @@ class AudioUtils {
             switch self {
             case .microphone:
                 return "开始录制麦克风"
-            case .systemAudio:
-                return "开始录制系统声音"
+            case .specificProcess:
+                return "开始录制选中进程"
+            case .systemMixdown:
+                return "开始录制系统混音"
             }
         }
     }

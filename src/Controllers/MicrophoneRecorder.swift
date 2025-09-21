@@ -9,6 +9,8 @@ class MicrophoneRecorder: BaseAudioRecorder {
     private let engine = AVAudioEngine()
     private let recordMixer = AVAudioMixerNode()
     private var mixerFormat: AVAudioFormat?
+    private var totalFramesWritten: AVAudioFrameCount = 0
+    private var lastStatsLogTime: TimeInterval = 0
     // 调试用：强制使用PCM(WAV)参数写入，验证输入链路（与输入buffer格式一致，避免编码干扰）
     private let forcePCMForDebug: Bool = true
     
@@ -24,7 +26,9 @@ class MicrophoneRecorder: BaseAudioRecorder {
             return
         }
         
-        let url = fileManager.getRecordingFileURL(format: currentFormat.fileExtension)
+        // 若使用PCM调试写入，强制使用 .wav 扩展名，避免后续读取/播放因扩展名与容器不符报错
+        let targetExtension = forcePCMForDebug ? "wav" : currentFormat.fileExtension
+        let url = fileManager.getRecordingFileURL(format: targetExtension)
         logger.info("开始录制，模式: \(recordingMode.rawValue), 格式: \(currentFormat.rawValue)")
         
         do {
@@ -86,15 +90,15 @@ class MicrophoneRecorder: BaseAudioRecorder {
         let mixerOutputFormat = AVAudioFormat(commonFormat: commonFormat, sampleRate: desiredSampleRate, channels: 2, interleaved: false)
         mixerFormat = mixerOutputFormat
         
-        // Connect microphone input directly to mixer
+        // Connect microphone input directly to main mixer，尽量简化拉流链路
         let input = engine.inputNode
-        let inputFormat = input.inputFormat(forBus: 0)
+        let inputFormat = getSafeInputFormat()
         logger.info("麦克风输入格式: \(inputFormat.settings)")
         logger.info("麦克风采样率: \(inputFormat.sampleRate), 声道数: \(inputFormat.channelCount)")
         
-        // Use microphone's native format
-        engine.connect(input, to: recordMixer, format: inputFormat)
-        logger.info("已连接麦克风输入到混音器")
+        // Use microphone's (safe) format 直连 mainMixerNode
+        engine.connect(input, to: engine.mainMixerNode, format: inputFormat)
+        logger.info("已连接麦克风输入到主混音器")
     }
 
     private func logAvailableAudioInputDevices() {
@@ -158,9 +162,9 @@ class MicrophoneRecorder: BaseAudioRecorder {
     }
     
     private func installMicrophoneRecordingTap() {
-        // 直接在 inputNode 上安装 tap（使用其原生格式抓取）
+        // 直接在 inputNode 上安装 tap（使用其安全格式抓取）
         let input = engine.inputNode
-        let inputFormat = input.inputFormat(forBus: 0)
+        let inputFormat = getSafeInputFormat()
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, time in
             guard let self = self, let file = self.audioFile else { return }
@@ -168,6 +172,7 @@ class MicrophoneRecorder: BaseAudioRecorder {
             // Write to audio file
             do {
                 try file.write(from: buffer)
+                self.totalFramesWritten += buffer.frameLength
             } catch {
                 self.logger.error("写入麦克风音频失败: \(error.localizedDescription)")
             }
@@ -176,25 +181,52 @@ class MicrophoneRecorder: BaseAudioRecorder {
             let level = self.calculateRMSLevel(from: buffer)
             
             // Add debug info
-            self.logger.info("麦克风录制电平: \(String(format: "%.4f", level)), 帧数: \(buffer.frameLength), rate=\(buffer.format.sampleRate), ch=\(buffer.format.channelCount)")
-            
-            Task { @MainActor in
-                self.onLevel?(level)
+            if level > 0.005 {
+                self.logger.info("麦克风录制电平: \(String(format: "%.4f", level)), 帧数: \(buffer.frameLength), rate=\(buffer.format.sampleRate), ch=\(buffer.format.channelCount)")
             }
+            
+            // 统计日志：每秒打印一次累计帧数
+            let now = CFAbsoluteTimeGetCurrent()
+            if now - self.lastStatsLogTime > 1.0 {
+                self.lastStatsLogTime = now
+                self.logger.info("累计写入帧数: \(self.totalFramesWritten)")
+            }
+            Task { @MainActor in self.onLevel?(level) }
         }
         
         logger.info("麦克风录制监听已安装（inputNode）")
     }
     
     private func startAudioEngine() throws {
-        // Ensure no system output to avoid feedback
-        engine.mainMixerNode.outputVolume = 0
+        // 为避免啸叫，主混音器音量保持很低但不为0以驱动pull
+        engine.mainMixerNode.outputVolume = 0.01
         
-        // Connect mixer to main mixer to drive rendering, but keep silent
-        engine.connect(recordMixer, to: engine.mainMixerNode, format: mixerFormat)
-        logger.info("已连接混音器到主混音器（麦克风模式）")
+        // 录制链路已将 input 直连 mainMixer，这里无需再接 recordMixer
+        logger.info("麦克风链路：input -> mainMixer 建立")
+        
+        // 在主混音器安装一个空tap，强制驱动渲染循环
+        let mainFmt = engine.mainMixerNode.outputFormat(forBus: 0)
+        engine.mainMixerNode.removeTap(onBus: 0)
+        engine.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: mainFmt) { _, _ in }
+        engine.prepare()
         
         try engine.start()
         logger.info("麦克风录制引擎启动成功")
+    }
+
+    private func getSafeInputFormat() -> AVAudioFormat {
+        let raw = engine.inputNode.inputFormat(forBus: 0)
+        let sampleRate = raw.sampleRate
+        let channels = raw.channelCount
+        if sampleRate > 0, channels > 0 {
+            return raw
+        }
+        // 回退：尝试主混音器输出格式
+        let mixerFmt = engine.mainMixerNode.outputFormat(forBus: 0)
+        if mixerFmt.sampleRate > 0, mixerFmt.channelCount > 0 {
+            return mixerFmt
+        }
+        // 最终兜底：48k/单声道 Float32 非交织
+        return AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false)!
     }
 }
