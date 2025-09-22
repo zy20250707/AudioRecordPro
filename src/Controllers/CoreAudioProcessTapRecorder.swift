@@ -18,6 +18,7 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
     private var processTapManager: ProcessTapManager?
     private var aggregateDeviceManager: AggregateDeviceManager?
     private let audioCallbackHandler = AudioCallbackHandler()
+    private var audioToolboxFileManager: AudioToolboxFileManager?
     
     // MARK: - Initialization
     override init(mode: AudioUtils.RecordingMode) {
@@ -86,32 +87,36 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
     }
     
     private func createAudioFileWithTapFormat(tapFormat: AudioStreamBasicDescription) {
-        // 使用与Tap输入数据一致的格式创建音频文件
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatLinearPCM,  // 使用标准PCM格式
-            AVSampleRateKey: tapFormat.mSampleRate, // 使用Tap的采样率
-            AVNumberOfChannelsKey: tapFormat.mChannelsPerFrame, // 使用Tap的声道数
-            AVLinearPCMBitDepthKey: 32,            // 32位深度，与输入数据一致
-            AVLinearPCMIsFloatKey: true,           // 使用浮点格式，与输入数据一致
-            AVLinearPCMIsBigEndianKey: false,      // 小端序
-            AVLinearPCMIsNonInterleaved: false     // 交错格式，确保兼容性
-        ]
+        logger.info("🎵 使用 AudioToolbox API 创建标准 WAV 文件")
+        logger.info("📊 Tap格式: 采样率=\(tapFormat.mSampleRate), 声道数=\(tapFormat.mChannelsPerFrame), 位深=\(tapFormat.mBitsPerChannel)")
         
-        logger.info("使用Tap格式创建音频文件: \(settings)")
+        // 生成文件名
+        let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let fileName = "record_\(timestamp).wav"
+        let defaultURL = fileManager.getRecordingFileURL(format: "wav")
         
-        // 使用沙盒支持的文件创建方法
-        createAudioFileWithSandboxSupportAndSettings(settings: settings) { [weak self] result in
-            guard let self = self else { return }
+        do {
+            // 创建 AudioToolbox 文件管理器
+            let audioToolboxManager = AudioToolboxFileManager(audioFormat: tapFormat)
+            try audioToolboxManager.createAudioFile(at: defaultURL)
             
-            switch result {
-            case .success(let url):
-                self.logger.info("音频文件创建成功: \(url.path)")
-                // 继续录制流程
-                self.continueRecordingProcess()
-            case .failure(let error):
-                self.onStatus?("创建文件失败: \(error.localizedDescription)")
-                self.logger.error("创建文件失败: \(error.localizedDescription)")
-            }
+            // 设置到回调处理器
+            audioCallbackHandler.setAudioToolboxFileManager(audioToolboxManager)
+            
+            // 保存引用以便后续清理
+            self.audioToolboxFileManager = audioToolboxManager
+            self.outputURL = defaultURL
+            
+            onStatus?("文件创建成功: \(fileName)")
+            logger.info("✅ AudioToolbox 音频文件创建成功: \(fileName)")
+            
+            // 继续录制流程
+            continueRecordingProcess()
+            
+        } catch {
+            let errorMsg = "创建文件失败: \(error.localizedDescription)"
+            onStatus?(errorMsg)
+            logger.error("❌ \(errorMsg)")
         }
     }
     
@@ -148,6 +153,10 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
     override func stopRecording() {
         // 停止 CoreAudio 录制
         stopCoreAudioProcessTapCapture()
+        
+        // 关闭 AudioToolbox 文件管理器
+        audioToolboxFileManager?.closeFile()
+        audioToolboxFileManager = nil
         
         super.stopRecording()
     }

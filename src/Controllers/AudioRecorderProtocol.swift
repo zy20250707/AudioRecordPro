@@ -99,6 +99,22 @@ class BaseAudioRecorder: NSObject, AudioRecorderProtocol {
         isRunning = false
         levelMonitor.stopMonitoring()
         
+        // 强制刷新音频文件缓冲区
+        if let file = audioFile {
+            do {
+                // 创建一个空的PCM缓冲区来强制刷新
+                guard let emptyBuffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 0) else {
+                    logger.warning("无法创建空缓冲区")
+                    return
+                }
+                emptyBuffer.frameLength = 0
+                try file.write(from: emptyBuffer)
+                logger.info("音频文件缓冲区已刷新")
+            } catch {
+                logger.warning("刷新音频文件缓冲区失败: \(error.localizedDescription)")
+            }
+        }
+        
         // Close audio file
         audioFile = nil
         
@@ -171,9 +187,8 @@ class BaseAudioRecorder: NSObject, AudioRecorderProtocol {
             standardSettings[AVFormatIDKey] = kAudioFormatLinearPCM
             standardSettings[AVLinearPCMIsNonInterleaved] = false  // 强制交错格式
             
-            // 使用标准格式创建，确保兼容性
-            let standardFormat = AVAudioFormat(standardFormatWithSampleRate: standardSettings[AVSampleRateKey] as! Double, channels: standardSettings[AVNumberOfChannelsKey] as! AVAudioChannelCount)!
-            audioFile = try AVAudioFile(forWriting: defaultURL, settings: standardSettings, commonFormat: standardFormat.commonFormat, interleaved: true)
+            // 直接使用settings创建，不使用commonFormat覆盖
+            audioFile = try AVAudioFile(forWriting: defaultURL, settings: standardSettings)
             outputURL = defaultURL
             
             onStatus?("文件创建成功: \(fileName)")

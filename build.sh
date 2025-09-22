@@ -49,6 +49,7 @@ swiftc \
   "$STAGE_DIR/src/Controllers/AudioProcessEnumerator.swift" \
   "$STAGE_DIR/src/Controllers/ProcessTapManager.swift" \
   "$STAGE_DIR/src/Controllers/AggregateDeviceManager.swift" \
+  "$STAGE_DIR/src/Controllers/AudioToolboxFileManager.swift" \
   "$STAGE_DIR/src/Controllers/AudioCallbackHandler.swift" \
   "$STAGE_DIR/src/Controllers/CoreAudioProcessTapRecorder.swift" \
   "$STAGE_DIR/src/Controllers/AudioRecorderController.swift" \
