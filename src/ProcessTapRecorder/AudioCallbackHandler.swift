@@ -58,8 +58,9 @@ func globalAudioCallback(
     // 注意：bufferList.mNumberBuffers 是缓冲区数量，不是声道数
     // 对于交错格式，通常只有一个缓冲区包含所有声道数据
     let totalSamples = Int(buffer.mDataByteSize) / bytesPerSample
-    // 假设是立体声（2声道），每帧包含2个样本
-    let channels = 2 // 从Process Tap获取的格式信息
+    // 从Process Tap获取的格式信息中获取声道数
+    // 这里需要从实际的音频格式中获取，暂时使用默认值2
+    let channels = 2 // TODO: 从实际的音频格式中获取声道数
     let frameCount = UInt32(totalSamples / channels)
     
     // 计算电平
@@ -126,16 +127,15 @@ class AudioCallbackHandler {
         
         let abl = bufferList.pointee
         let channels = Int(asbd.mChannelsPerFrame)
-        let bytesPerFrame = Int(asbd.mBytesPerFrame)
+        let _ = Int(asbd.mBytesPerFrame) // 暂时未使用，但保留以备将来使用
         
         guard let src = abl.mBuffers.mData else { return nil }
         
         if let dst = pcm.floatChannelData {
-            let frameStride = Int(bytesPerFrame)
             let totalFrames = Int(frames)
             for c in 0..<channels {
                 var s = src.assumingMemoryBound(to: Float.self).advanced(by: c)
-                var d = dst[c]
+                let d = dst[c]
                 for i in 0..<totalFrames {
                     d[i] = s.pointee
                     s = s.advanced(by: channels)
@@ -143,11 +143,10 @@ class AudioCallbackHandler {
             }
         } else if let dst = pcm.int16ChannelData {
             // 将32位浮点数据转换为16位整数数据
-            let frameStride = Int(bytesPerFrame)
             let totalFrames = Int(frames)
             for c in 0..<channels {
                 var s = src.assumingMemoryBound(to: Float.self).advanced(by: c)
-                var d = dst[c]
+                let d = dst[c]
                 for i in 0..<totalFrames {
                     // 将浮点数转换为16位整数：-1.0 到 1.0 映射到 -32768 到 32767
                     let floatValue = s.pointee
@@ -157,11 +156,10 @@ class AudioCallbackHandler {
                 }
             }
         } else if let dst = pcm.int32ChannelData {
-            let frameStride = Int(bytesPerFrame)
             let totalFrames = Int(frames)
             for c in 0..<channels {
                 var s = src.assumingMemoryBound(to: Int32.self).advanced(by: c)
-                var d = dst[c]
+                let d = dst[c]
                 for i in 0..<totalFrames {
                     d[i] = s.pointee
                     s = s.advanced(by: channels)
@@ -180,40 +178,10 @@ class AudioCallbackHandler {
             return 
         }
         
-        let buffer = bufferList.mBuffers
-        guard let data = buffer.mData else { 
-            logger.debug("AudioCallbackHandler: 音频数据为空")
-            return 
-        }
+        // 使用统一的工具类计算电平
+        let (maxLevel, rmsLevel, normalizedLevel) = AudioUtils.calculateAudioLevel(from: bufferList, frameCount: frameCount)
         
-        let samples = data.assumingMemoryBound(to: Float.self)
-        let sampleCount = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
-        
-        logger.debug("AudioCallbackHandler: 计算电平 - frameCount: \(frameCount), sampleCount: \(sampleCount), dataSize: \(buffer.mDataByteSize)")
-        
-        var maxLevel: Float = 0.0
-        var rmsLevel: Float = 0.0
-        var sumSquares: Float = 0.0
-        
-        for i in 0..<sampleCount {
-            let sample = abs(samples[i])
-            if sample > maxLevel {
-                maxLevel = sample
-            }
-            sumSquares += sample * sample
-        }
-        
-        // 计算 RMS
-        if sampleCount > 0 {
-            rmsLevel = sqrt(sumSquares / Float(sampleCount))
-        }
-        
-        // 转换为 dB
-        let maxDB = maxLevel > 0 ? 20 * log10(maxLevel) : -96.0
-        let rmsDB = rmsLevel > 0 ? 20 * log10(rmsLevel) : -96.0
-        let normalizedLevel = max(0, min(1, (rmsDB + 96) / 96))
-        
-        logger.debug("AudioCallbackHandler: 电平计算 - maxLevel: \(maxLevel), rmsLevel: \(rmsLevel), maxDB: \(maxDB), rmsDB: \(rmsDB), normalized: \(normalizedLevel)")
+        logger.debug("AudioCallbackHandler: 电平计算 - maxLevel: \(maxLevel), rmsLevel: \(rmsLevel), normalized: \(normalizedLevel)")
         
         DispatchQueue.main.async {
             onLevel(normalizedLevel)
@@ -255,7 +223,6 @@ class AudioCallbackHandler {
         // 调试：检查格式匹配
         logger.debug("AudioCallbackHandler: PCM缓冲区格式 - 声道数: \(audioFile.processingFormat.channelCount), 采样率: \(audioFile.processingFormat.sampleRate), 交错: \(audioFile.processingFormat.isInterleaved)")
         
-        // 复制bufferList中的数据到PCM缓冲区
         // 处理交错和非交错格式
         if bufferList.mNumberBuffers == 1 {
             // 交错格式：所有声道数据在一个buffer中
@@ -266,107 +233,25 @@ class AudioCallbackHandler {
                 return 
             }
             
-            // 根据输出格式选择正确的数据类型
-            logger.debug("AudioCallbackHandler: 检查PCM缓冲区数据类型 - int16ChannelData: \(pcmBuffer.int16ChannelData != nil), floatChannelData: \(pcmBuffer.floatChannelData != nil)")
-            if let dstChannelData = pcmBuffer.floatChannelData {
-                // 输出格式是32位浮点
-                logger.debug("AudioCallbackHandler: 进入floatChannelData分支")
-                let srcData = buffer.mData!.assumingMemoryBound(to: Float.self)
-                let outputChannels = Int(audioFile.processingFormat.channelCount)
-                let frameCountInt = Int(frameCount)
-                
-                // 计算输入数据的实际声道数
-                let totalSamples = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
-                let inputChannels = totalSamples / frameCountInt
-                
-                logger.debug("AudioCallbackHandler: 数据解析 - 总样本: \(totalSamples), 帧数: \(frameCountInt), 输入声道: \(inputChannels), 输出声道: \(outputChannels)")
-                
-                if inputChannels == 1 && outputChannels == 2 {
-                    // 单声道转立体声：将单声道数据复制到左右声道
-                    for frame in 0..<frameCountInt {
-                        if frame < totalSamples {
-                            let monoValue = srcData[frame]
-                            dstChannelData[0][frame] = monoValue  // 左声道
-                            dstChannelData[1][frame] = monoValue  // 右声道
-                        }
-                    }
-                    logger.debug("AudioCallbackHandler: 单声道转立体声完成，复制了 \(frameCountInt) 帧")
-                } else if inputChannels == outputChannels {
-                    // 声道数匹配：直接复制交错数据
-                    for frame in 0..<frameCountInt {
-                        for channel in 0..<outputChannels {
-                            let srcIndex = frame * inputChannels + channel
-                            if srcIndex < totalSamples {
-                                dstChannelData[channel][frame] = srcData[srcIndex]
-                            }
-                        }
-                    }
-                    logger.debug("AudioCallbackHandler: 直接复制完成，\(inputChannels)声道到\(outputChannels)声道")
-                } else {
-                    // 其他情况：尝试交错格式解析
-                    let channelDataSize = min(totalSamples / inputChannels, frameCountInt)
-                    for frame in 0..<channelDataSize {
-                        for channel in 0..<min(outputChannels, inputChannels) {
-                            let srcIndex = frame * inputChannels + channel
-                            if srcIndex < totalSamples {
-                                dstChannelData[channel][frame] = srcData[srcIndex]
-                            }
-                        }
-                    }
-                    logger.debug("AudioCallbackHandler: 交错格式解析完成，处理了 \(channelDataSize) 帧")
-                }
-                
-                // 设置实际写入的帧数
-                pcmBuffer.frameLength = UInt32(frameCountInt)
-            } else if let dstChannelData = pcmBuffer.int16ChannelData {
-                // 输出格式是16位整数
-                let srcData = buffer.mData!.assumingMemoryBound(to: Float.self)
-                let outputChannels = Int(audioFile.processingFormat.channelCount)
-                let frameCountInt = Int(frameCount)
-                
-                // 计算输入数据的实际声道数
-                let totalSamples = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
-                let inputChannels = totalSamples / frameCountInt
-                
-                logger.debug("AudioCallbackHandler: 数据解析 - 总样本: \(totalSamples), 帧数: \(frameCountInt), 输入声道: \(inputChannels), 输出声道: \(outputChannels)")
-                
-                if inputChannels == 1 && outputChannels == 2 {
-                    // 单声道转立体声：将单声道数据复制到左右声道
-                    for frame in 0..<frameCountInt {
-                        if frame < totalSamples {
-                            let monoValue = Int16(srcData[frame] * 32767.0) // 转换为16位整数
-                            dstChannelData[0][frame] = monoValue  // 左声道
-                            dstChannelData[1][frame] = monoValue  // 右声道
-                        }
-                    }
-                    logger.debug("AudioCallbackHandler: 单声道转立体声完成，复制了 \(frameCountInt) 帧")
-                } else if inputChannels == outputChannels {
-                    // 声道数匹配：直接复制交错数据
-                    for frame in 0..<frameCountInt {
-                        for channel in 0..<outputChannels {
-                            let srcIndex = frame * inputChannels + channel
-                            if srcIndex < totalSamples {
-                                dstChannelData[channel][frame] = Int16(srcData[srcIndex] * 32767.0) // 转换为16位整数
-                            }
-                        }
-                    }
-                    logger.debug("AudioCallbackHandler: 直接复制完成，\(inputChannels)声道到\(outputChannels)声道")
-                } else {
-                    // 其他情况：尝试交错格式解析
-                    let channelDataSize = min(totalSamples / inputChannels, frameCountInt)
-                    for frame in 0..<channelDataSize {
-                        for channel in 0..<min(outputChannels, inputChannels) {
-                            let srcIndex = frame * inputChannels + channel
-                            if srcIndex < totalSamples {
-                                dstChannelData[channel][frame] = Int16(srcData[srcIndex] * 32767.0) // 转换为16位整数
-                            }
-                        }
-                    }
-                    logger.debug("AudioCallbackHandler: 交错格式解析完成，处理了 \(channelDataSize) 帧")
-                }
-                
-                // 设置实际写入的帧数
-                pcmBuffer.frameLength = UInt32(frameCountInt)
+            // 计算输入数据的实际声道数
+            let totalSamples = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+            let inputChannels = totalSamples / Int(frameCount)
+            let outputChannels = Int(audioFile.processingFormat.channelCount)
+            
+            logger.debug("AudioCallbackHandler: 数据解析 - 总样本: \(totalSamples), 帧数: \(frameCount), 输入声道: \(inputChannels), 输出声道: \(outputChannels)")
+            
+            // 使用统一的工具类复制数据到PCM缓冲区
+            let success = AudioUtils.copyAudioDataToPCMBuffer(
+                from: bufferList,
+                to: pcmBuffer,
+                frameCount: frameCount,
+                inputChannels: inputChannels,
+                outputChannels: outputChannels
+            )
+            
+            if !success {
+                logger.warning("AudioCallbackHandler: 数据复制失败，跳过写入")
+                return
             }
         } else {
             // 非交错格式：每个声道有独立的buffer

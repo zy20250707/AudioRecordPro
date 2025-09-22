@@ -53,7 +53,7 @@ class AudioToolboxFileManager {
             &audioFileID
         )
         
-        guard status == noErr, let fileID = audioFileID else {
+        guard status == noErr, let _ = audioFileID else {
             let error = NSError(domain: "AudioToolboxFileManager", code: Int(status), userInfo: [
                 NSLocalizedDescriptionKey: "创建音频文件失败: \(status)"
             ])
@@ -78,12 +78,23 @@ class AudioToolboxFileManager {
             return
         }
         
-        // 转换32位浮点数据为16位整数数据
-        let convertedData = try convertFloat32ToInt16(bufferList: bufferList, frameCount: frameCount)
+        // 计算输入数据的实际声道数
+        let buffer = bufferList.mBuffers
+        let totalSamples = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+        let inputChannels = totalSamples / Int(frameCount)
+        let outputChannels = Int(audioFormat.mChannelsPerFrame)
+        
+        // 使用统一的工具类转换32位浮点数据为16位整数数据
+        let convertedData = try AudioUtils.convertFloat32ToInt16(
+            bufferList: bufferList,
+            frameCount: frameCount,
+            inputChannels: inputChannels,
+            outputChannels: outputChannels
+        )
         
         // 准备写入数据
         var inNumPackets = frameCount
-        var ioNumBytes = UInt32(convertedData.count)
+        let ioNumBytes = UInt32(convertedData.count)
         
         // 使用 AudioFileWritePackets 写入数据
         let status = convertedData.withUnsafeBytes { bytes in
@@ -131,81 +142,6 @@ class AudioToolboxFileManager {
     
     // MARK: - Private Methods
     
-    /// 转换32位浮点数据为16位整数数据
-    private func convertFloat32ToInt16(bufferList: AudioBufferList, frameCount: UInt32) throws -> Data {
-        guard bufferList.mNumberBuffers == 1 else {
-            throw NSError(domain: "AudioToolboxFileManager", code: -1, userInfo: [
-                NSLocalizedDescriptionKey: "不支持多缓冲区格式"
-            ])
-        }
-        
-        let buffer = bufferList.mBuffers
-        guard let srcData = buffer.mData else {
-            throw NSError(domain: "AudioToolboxFileManager", code: -1, userInfo: [
-                NSLocalizedDescriptionKey: "输入数据为空"
-            ])
-        }
-        
-        let frameCountInt = Int(frameCount)
-        let channels = Int(audioFormat.mChannelsPerFrame)
-        let totalSamples = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
-        let inputChannels = totalSamples / frameCountInt
-        
-        logger.debug("🔄 数据转换: 输入声道=\(inputChannels), 输出声道=\(channels), 帧数=\(frameCountInt)")
-        
-        // 创建输出数据缓冲区
-        let outputBytesPerFrame = channels * MemoryLayout<Int16>.size
-        let outputDataSize = frameCountInt * outputBytesPerFrame
-        var outputData = Data(count: outputDataSize)
-        
-        let srcFloatData = srcData.assumingMemoryBound(to: Float.self)
-        
-        outputData.withUnsafeMutableBytes { outputBytes in
-            let dstInt16Data = outputBytes.bindMemory(to: Int16.self)
-            
-            if inputChannels == 1 && channels == 2 {
-                // 单声道转立体声
-                for frame in 0..<frameCountInt {
-                    if frame < totalSamples {
-                        let monoValue = srcFloatData[frame]
-                        let int16Value = Int16(max(-1.0, min(1.0, monoValue)) * 32767.0)
-                        dstInt16Data[frame * 2] = int16Value      // 左声道
-                        dstInt16Data[frame * 2 + 1] = int16Value  // 右声道
-                    }
-                }
-                logger.debug("🔄 单声道转立体声完成")
-            } else if inputChannels == channels {
-                // 声道数匹配：直接转换
-                for frame in 0..<frameCountInt {
-                    for channel in 0..<channels {
-                        let srcIndex = frame * inputChannels + channel
-                        if srcIndex < totalSamples {
-                            let floatValue = srcFloatData[srcIndex]
-                            let int16Value = Int16(max(-1.0, min(1.0, floatValue)) * 32767.0)
-                            dstInt16Data[frame * channels + channel] = int16Value
-                        }
-                    }
-                }
-                logger.debug("🔄 直接转换完成")
-            } else {
-                // 其他情况：尝试交错格式解析
-                let channelDataSize = min(totalSamples / inputChannels, frameCountInt)
-                for frame in 0..<channelDataSize {
-                    for channel in 0..<min(channels, inputChannels) {
-                        let srcIndex = frame * inputChannels + channel
-                        if srcIndex < totalSamples {
-                            let floatValue = srcFloatData[srcIndex]
-                            let int16Value = Int16(max(-1.0, min(1.0, floatValue)) * 32767.0)
-                            dstInt16Data[frame * channels + channel] = int16Value
-                        }
-                    }
-                }
-                logger.debug("🔄 交错格式解析完成")
-            }
-        }
-        
-        return outputData
-    }
     
     /// 创建标准 WAV 格式
     private func createStandardWAVFormat(from inputFormat: AudioStreamBasicDescription) -> AudioStreamBasicDescription {

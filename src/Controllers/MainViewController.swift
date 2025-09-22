@@ -727,10 +727,10 @@ extension MainViewController: MainWindowViewDelegate {
             guard let self = self else { return }
             
             if #available(macOS 14.4, *) {
-                let coreAudioRecorder = CoreAudioProcessTapRecorder(mode: .systemMixdown)
-                let processes = coreAudioRecorder.getAvailableAudioProcesses()
-                
-                DispatchQueue.main.async {
+                Task { @MainActor in
+                    let coreAudioRecorder = CoreAudioProcessTapRecorder(mode: .systemMixdown)
+                    let processes = coreAudioRecorder.getAvailableAudioProcesses()
+                    
                     self.mainWindowView.updateProcessList(processes)
                     self.logger.info("✅ 进程列表刷新完成，发现 \(processes.count) 个进程")
                     self.mainWindowView.updateStatus("进程列表已刷新，发现 \(processes.count) 个进程")

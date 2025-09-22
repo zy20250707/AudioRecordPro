@@ -270,7 +270,7 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
             
             // 测试步骤5: 创建回调函数
             logger.info("🎧 测试步骤5: 创建音频回调...")
-            let (callback, clientData) = audioCallbackHandler.createAudioCallback()
+            let (_, _) = audioCallbackHandler.createAudioCallback()
             logger.info("✅ 步骤5测试通过: 音频回调创建成功")
             
             // 清理测试资源

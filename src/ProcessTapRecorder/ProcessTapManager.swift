@@ -48,7 +48,7 @@ class ProcessTapManager {
             
             // 方法1: 尝试 stereoMixdownOfProcesses (参考AudioCap和audio-rec)
             logger.info("🔧 尝试方法1: stereoMixdownOfProcesses")
-            var desc = CATapDescription(stereoMixdownOfProcesses: [processObjectID])
+            let desc = CATapDescription(stereoMixdownOfProcesses: [processObjectID])
             desc.uuid = uuid
             desc.muteBehavior = .unmuted
             desc.isExclusive = false  // 参考audio-rec
@@ -97,7 +97,9 @@ class ProcessTapManager {
         
         var tapUID: CFString?
         var dataSize = UInt32(MemoryLayout<CFString>.size)
-        let uidStatus = AudioObjectGetPropertyData(tapID, &tapUIDProperty, 0, nil, &dataSize, &tapUID)
+        let uidStatus = withUnsafeMutablePointer(to: &tapUID) { tapUIDPtr in
+            AudioObjectGetPropertyData(tapID, &tapUIDProperty, 0, nil, &dataSize, tapUIDPtr)
+        }
         
         if uidStatus == noErr, let realTapUID = tapUID {
             self.tapUUID = realTapUID

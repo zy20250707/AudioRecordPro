@@ -46,15 +46,15 @@ swiftc \
   "$STAGE_DIR/src/Controllers/AudioRecorderProtocol.swift" \
   "$STAGE_DIR/src/Controllers/MicrophoneRecorder.swift" \
   "$STAGE_DIR/src/Controllers/SystemAudioRecorder.swift" \
-  "$STAGE_DIR/src/Controllers/AudioProcessEnumerator.swift" \
-  "$STAGE_DIR/src/Controllers/ProcessTapManager.swift" \
-  "$STAGE_DIR/src/Controllers/AggregateDeviceManager.swift" \
-  "$STAGE_DIR/src/Controllers/AudioToolboxFileManager.swift" \
-  "$STAGE_DIR/src/Controllers/AudioCallbackHandler.swift" \
-  "$STAGE_DIR/src/Controllers/CoreAudioProcessTapRecorder.swift" \
   "$STAGE_DIR/src/Controllers/AudioRecorderController.swift" \
   "$STAGE_DIR/src/Controllers/MainViewController.swift" \
-  "$STAGE_DIR/src/Controllers/AppDelegate.swift"
+  "$STAGE_DIR/src/Controllers/AppDelegate.swift" \
+  "$STAGE_DIR/src/ProcessTapRecorder/AudioProcessEnumerator.swift" \
+  "$STAGE_DIR/src/ProcessTapRecorder/ProcessTapManager.swift" \
+  "$STAGE_DIR/src/ProcessTapRecorder/AggregateDeviceManager.swift" \
+  "$STAGE_DIR/src/ProcessTapRecorder/AudioToolboxFileManager.swift" \
+  "$STAGE_DIR/src/ProcessTapRecorder/AudioCallbackHandler.swift" \
+  "$STAGE_DIR/src/ProcessTapRecorder/CoreAudioProcessTapRecorder.swift"
 
 echo "[3/4] 拷贝 Info.plist 与资源..."
 plutil -convert binary1 "$ROOT_DIR/Info.plist" -o "$CONTENTS_DIR/Info.plist"
