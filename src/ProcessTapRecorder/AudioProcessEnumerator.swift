@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import CoreAudio
+import AppKit
 
 // MARK: - AudioProcessInfo 结构体
 struct AudioProcessInfo: Hashable {
@@ -76,6 +77,12 @@ class AudioProcessEnumerator {
             }
             
             let bundleID = readBundleID(for: oid) ?? ""
+
+            // 进一步过滤：排除 Helper/Renderer/GPU 等辅助进程（如 Google Chrome Helper）
+            if isHelperApp(name: name, bundleID: bundleID, path: path) {
+                logger.debug("🧹 过滤 Helper 进程: name=\(name), bundle=\(bundleID), path=\(path)")
+                continue
+            }
             let info = AudioProcessInfo(
                 pid: pid,
                 name: name,
@@ -176,7 +183,6 @@ class AudioProcessEnumerator {
     }
 
     private func readNameAndPath(for pid: pid_t) -> (String, String) {
-        // 优先尝试 Darwin 接口
         let nameBuffer = UnsafeMutablePointer<Int8>.allocate(capacity: Int(MAXPATHLEN))
         let pathBuffer = UnsafeMutablePointer<Int8>.allocate(capacity: Int(MAXPATHLEN))
         defer { nameBuffer.deallocate(); pathBuffer.deallocate() }
@@ -190,7 +196,6 @@ class AudioProcessEnumerator {
         if nameLen > 0 {
             name = String(cString: nameBuffer)
         } else {
-            // 尝试通过路径获取名称
             if pathLen > 0 {
                 path = String(cString: pathBuffer)
                 name = URL(fileURLWithPath: path).lastPathComponent
@@ -204,37 +209,33 @@ class AudioProcessEnumerator {
         
         path = pathLen > 0 ? String(cString: pathBuffer) : ""
         
-        // 过滤掉一些系统进程
-        if shouldFilterProcess(name: name, pid: pid, path: path) {
-            return ("", "") // 返回空字符串表示过滤掉
+        let bundlePath = convertToBundlePath(path)
+        
+        if shouldFilterProcess(name: name, pid: pid, path: bundlePath) {
+            return ("", "")
         }
         
-        return (name, path)
+        return (name, bundlePath)
     }
     
     private func shouldFilterProcess(name: String, pid: pid_t, path: String) -> Bool {
-        // 过滤掉一些系统进程和无效进程
         let systemProcesses = [
             "kernel_task", "launchd", "kernel", "mach_init",
             "WindowServer", "loginwindow", "sh", "bash", "zsh"
         ]
         
-        // 过滤系统进程
         if systemProcesses.contains(name) {
             return true
         }
         
-        // 过滤 PID 过小的进程（通常是系统进程）
         if pid < 100 {
             return true
         }
         
-        // 过滤没有路径的进程
         if path.isEmpty {
             return true
         }
         
-        // 过滤一些特殊的系统路径
         let systemPaths = [
             "/System/Library/",
             "/usr/libexec/",
@@ -248,6 +249,68 @@ class AudioProcessEnumerator {
             }
         }
         
+        // 仅保留 Dock 应用（ActivationPolicy == .regular）
+        if !isDockApp(pid: pid, path: path) {
+            return true
+        }
+        
         return false
+    }
+
+    /// 判断是否为浏览器/应用的 Helper、Renderer、GPU 等辅助进程
+    private func isHelperApp(name: String, bundleID: String, path: String) -> Bool {
+        let n = name.lowercased()
+        let b = bundleID.lowercased()
+        let p = path.lowercased()
+
+        // 常见关键字
+        let keywords = [" helper", "renderer", "gpu", "webhelper", "plugin", "(renderer)"]
+        if keywords.contains(where: { n.contains($0) }) { return true }
+        if keywords.contains(where: { b.contains($0) }) { return true }
+
+        // 路径特征：在 Helpers 目录下或以 Helper.app 结尾
+        if p.contains("/helpers/") || p.hasSuffix("helper.app") { return true }
+
+        // 具体特例：Google Chrome Helper 系列
+        if n.contains("google chrome helper") || b.contains("com.google.chrome.helper") { return true }
+
+        // WebKit/GPU 相关（已基本被系统路径过滤，但再兜底一次）
+        if n.contains("webkit") && (n.contains("gpu") || n.contains("network") || n.contains("webcontent")) {
+            return true
+        }
+        return false
+    }
+    
+    /// 判断是否为 Dock 应用
+    private func isDockApp(pid: pid_t, path: String) -> Bool {
+        if let running = NSRunningApplication(processIdentifier: pid) {
+            return running.activationPolicy == .regular
+        }
+        
+        let bundleURL = URL(fileURLWithPath: path)
+        if let bundle = Bundle(url: bundleURL) {
+            if let uiElement = bundle.object(forInfoDictionaryKey: "LSUIElement") as? Bool, uiElement { return false }
+            if let bgOnly = bundle.object(forInfoDictionaryKey: "LSBackgroundOnly") as? Bool, bgOnly { return false }
+            return true
+        }
+        
+        return false
+    }
+    
+    /// 将可执行文件路径转换为 .app bundle 路径
+    private func convertToBundlePath(_ executablePath: String) -> String {
+        guard !executablePath.isEmpty else { return executablePath }
+        
+        let url = URL(fileURLWithPath: executablePath)
+        var currentURL = url
+        
+        while currentURL.path != "/" {
+            if currentURL.pathExtension == "app" {
+                return currentURL.path
+            }
+            currentURL = currentURL.deletingLastPathComponent()
+        }
+        
+        return executablePath
     }
 }

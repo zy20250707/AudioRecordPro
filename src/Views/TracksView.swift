@@ -94,43 +94,56 @@ class TracksView: NSView {
         let trackView = NSView()
         trackView.translatesAutoresizingMaskIntoConstraints = false
         
+        // 顶部头部区域（图标 + 标题）
+        let headerView = NSView()
+        headerView.translatesAutoresizingMaskIntoConstraints = false
         let iconLabel = NSTextField()
         iconLabel.stringValue = track.icon
         iconLabel.isBordered = false
         iconLabel.isEditable = false
         iconLabel.backgroundColor = .clear
-        iconLabel.font = NSFont.systemFont(ofSize: 16)
+        iconLabel.font = NSFont.systemFont(ofSize: 24)
         iconLabel.translatesAutoresizingMaskIntoConstraints = false
-        
         let titleLabel = NSTextField()
         titleLabel.stringValue = track.title
         titleLabel.isBordered = false
         titleLabel.isEditable = false
         titleLabel.backgroundColor = .clear
-        titleLabel.font = NSFont.systemFont(ofSize: 13)
+        titleLabel.font = NSFont.systemFont(ofSize: 18)
         titleLabel.textColor = .labelColor
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        
+        headerView.addSubview(iconLabel)
+        headerView.addSubview(titleLabel)
+
+        // 电平表在下方占满宽度
         let levelMeter = LevelMeterView()
         levelMeter.translatesAutoresizingMaskIntoConstraints = false
-        
-        trackView.addSubview(iconLabel)
-        trackView.addSubview(titleLabel)
+
+        trackView.addSubview(headerView)
         trackView.addSubview(levelMeter)
-        
+
         NSLayoutConstraint.activate([
-            trackView.heightAnchor.constraint(equalToConstant: 40),
-            
-            iconLabel.leadingAnchor.constraint(equalTo: trackView.leadingAnchor, constant: 16),
-            iconLabel.centerYAnchor.constraint(equalTo: trackView.centerYAnchor),
+            trackView.heightAnchor.constraint(equalToConstant: 140),
+
+            // Header 布局
+            headerView.topAnchor.constraint(equalTo: trackView.topAnchor, constant: 12),
+            headerView.leadingAnchor.constraint(equalTo: trackView.leadingAnchor, constant: 16),
+            headerView.trailingAnchor.constraint(lessThanOrEqualTo: trackView.trailingAnchor, constant: -16),
+            headerView.heightAnchor.constraint(equalToConstant: 28),
+
+            iconLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor),
+            iconLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
             
             titleLabel.leadingAnchor.constraint(equalTo: iconLabel.trailingAnchor, constant: 12),
-            titleLabel.centerYAnchor.constraint(equalTo: trackView.centerYAnchor),
-            
-            levelMeter.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 16),
+            titleLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: headerView.trailingAnchor),
+
+            // LevelMeter 在下方
+            levelMeter.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 10),
+            levelMeter.leadingAnchor.constraint(equalTo: trackView.leadingAnchor, constant: 16),
             levelMeter.trailingAnchor.constraint(equalTo: trackView.trailingAnchor, constant: -16),
-            levelMeter.centerYAnchor.constraint(equalTo: trackView.centerYAnchor),
-            levelMeter.heightAnchor.constraint(equalToConstant: 20)
+            levelMeter.bottomAnchor.constraint(equalTo: trackView.bottomAnchor, constant: -12),
+            levelMeter.heightAnchor.constraint(equalToConstant: 96)
         ])
         
         tracksStack.addArrangedSubview(trackView)

@@ -162,7 +162,7 @@ struct AppConfiguration {
     init() {
         self.windowWidth = 750
         self.windowHeight = 480
-        self.autoPlayAfterRecording = true
+        self.autoPlayAfterRecording = false
         self.showLevelMeter = true
         self.logLevel = .info
         self.maxLogFileSize = 10 * 1024 * 1024 // 10MB

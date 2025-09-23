@@ -375,6 +375,16 @@ class MainViewController: NSViewController {
         
         logger.info("录制完成: \(recording.fileName), 时长: \(recording.formattedDuration), 大小: \(recording.formattedFileSize)")
         
+        // 添加到已录制文件列表
+        let fileInfo = RecordedFileInfo(
+            url: recording.fileURL,
+            name: recording.fileName,
+            date: recording.createdAt,
+            duration: recording.duration,
+            size: recording.fileSize
+        )
+        mainWindowView.addRecordedFile(fileInfo)
+        
         // 自动播放（如果启用）
         if AppConfiguration().autoPlayAfterRecording {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {

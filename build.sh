@@ -43,6 +43,9 @@ swiftc \
   "$STAGE_DIR/src/Views/ControlPanelView.swift" \
   "$STAGE_DIR/src/Views/StatusBarView.swift" \
   "$STAGE_DIR/src/Views/MainWindowView.swift" \
+  "$STAGE_DIR/src/Views/TabContainerView.swift" \
+  "$STAGE_DIR/src/Views/RecordedFilesView.swift" \
+  "$STAGE_DIR/src/Views/WaveformView.swift" \
   "$STAGE_DIR/src/Controllers/AudioRecorderProtocol.swift" \
   "$STAGE_DIR/src/Controllers/MicrophoneRecorder.swift" \
   "$STAGE_DIR/src/Controllers/SystemAudioRecorder.swift" \

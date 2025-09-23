@@ -153,6 +153,10 @@ class MainWindowView: NSView {
     func isMicrophoneSourceSelected() -> Bool {
         return sidebarView.isMicrophoneSourceSelected()
     }
+    
+    func addRecordedFile(_ file: RecordedFileInfo) {
+        sidebarView.addRecordedFile(file)
+    }
 }
 
 // MARK: - SidebarViewDelegate
@@ -168,6 +172,11 @@ extension MainWindowView: SidebarViewDelegate {
     
     func sidebarViewDidRequestProcessRefresh(_ view: SidebarView) {
         delegate?.mainWindowViewDidRequestProcessRefresh(self)
+    }
+    
+    func sidebarViewDidDoubleClickFile(_ view: SidebarView, file: RecordedFileInfo) {
+        // 从Finder中打开文件
+        NSWorkspace.shared.open(file.url)
     }
 }
 

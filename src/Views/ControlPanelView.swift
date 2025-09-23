@@ -23,6 +23,8 @@ class ControlPanelView: NSView {
     private var currentRecordingState: RecordingState = .idle
     private var buttonWidthConstraint: NSLayoutConstraint?
     private var buttonHeightConstraint: NSLayoutConstraint?
+    private let normalButtonSize: CGFloat = 64
+    private let recordingButtonSize: CGFloat = 48
     
     // MARK: - Initialization
     override init(frame frameRect: NSRect) {
@@ -108,8 +110,8 @@ class ControlPanelView: NSView {
     private func setupConstraints() {
         let containerW = buttonContainer.widthAnchor.constraint(equalToConstant: 84)
         let containerH = buttonContainer.heightAnchor.constraint(equalToConstant: 84)
-        let w = recordButton.widthAnchor.constraint(equalToConstant: 64)
-        let h = recordButton.heightAnchor.constraint(equalToConstant: 64)
+        let w = recordButton.widthAnchor.constraint(equalToConstant: normalButtonSize)
+        let h = recordButton.heightAnchor.constraint(equalToConstant: normalButtonSize)
         
         buttonWidthConstraint = w
         buttonHeightConstraint = h
@@ -161,32 +163,38 @@ class ControlPanelView: NSView {
             innerSquareLayer.isHidden = true
             recordButton.layer?.backgroundColor = NSColor.systemRed.cgColor
             recordButton.layer?.cornerRadius = 32
+            setRecordButtonSize(normalButtonSize, animated: true)
         case .preparing:
             recordButton.isEnabled = false
             innerSquareLayer.isHidden = true
             recordButton.layer?.backgroundColor = NSColor.systemRed.cgColor
             recordButton.layer?.cornerRadius = 32
+            setRecordButtonSize(normalButtonSize, animated: false)
         case .recording:
             recordButton.isEnabled = true
             // 外形切换为方形停播样式
             innerSquareLayer.isHidden = true
             recordButton.layer?.backgroundColor = NSColor.systemGray.cgColor
             recordButton.layer?.cornerRadius = 10
+            setRecordButtonSize(recordingButtonSize, animated: true)
         case .stopping:
             recordButton.isEnabled = false
             innerSquareLayer.isHidden = true
             recordButton.layer?.backgroundColor = NSColor.systemGray.cgColor
             recordButton.layer?.cornerRadius = 10
+            setRecordButtonSize(recordingButtonSize, animated: false)
         case .playing:
             recordButton.isEnabled = false
             innerSquareLayer.isHidden = true
             recordButton.layer?.backgroundColor = NSColor.systemRed.cgColor
             recordButton.layer?.cornerRadius = 32
+            setRecordButtonSize(normalButtonSize, animated: true)
         case .error:
             recordButton.isEnabled = true
             innerSquareLayer.isHidden = true
             recordButton.layer?.backgroundColor = NSColor.systemRed.cgColor
             recordButton.layer?.cornerRadius = 32
+            setRecordButtonSize(normalButtonSize, animated: false)
         }
     }
     
@@ -215,6 +223,21 @@ class ControlPanelView: NSView {
             let cgPath = CGMutablePath()
             cgPath.addArc(center: CGPoint(x: center.x, y: center.y), radius: radius, startAngle: 0, endAngle: CGFloat.pi * 2, clockwise: false)
             outerRingLayer.path = cgPath
+        }
+    }
+
+    // MARK: - Helpers
+    private func setRecordButtonSize(_ size: CGFloat, animated: Bool) {
+        guard let w = buttonWidthConstraint, let h = buttonHeightConstraint else { return }
+        w.constant = size
+        h.constant = size
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.15
+                layoutSubtreeIfNeeded()
+            }
+        } else {
+            layoutSubtreeIfNeeded()
         }
     }
 }
