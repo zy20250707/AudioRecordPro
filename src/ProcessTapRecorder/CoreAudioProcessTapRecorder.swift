@@ -157,66 +157,43 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
         
         logger.info("🚀 开始CoreAudio Process Tap录制")
         
-        // 对于系统音频录制，优先尝试Swift API
-        if targetPIDs.isEmpty {
-            logger.info("🎯 系统音频录制，尝试Swift API")
-            if startRecordingWithSwiftAPI() {
-                logger.info("✅ 使用Swift API录制成功")
-                isRunning = true
-                return
-            }
-            logger.warning("⚠️ Swift API失败，回退到C API")
-        } else {
-            logger.info("🎯 指定进程录制，使用C API")
-        }
+        logger.info("🎯 开始录制，使用C API")
         
         // 回退到原来的C API实现
         startCoreAudioRecordingWithTapFormat()
     }
     
     private func startCoreAudioRecordingWithTapFormat() {
-        // 步骤1: 先创建Process Tap获取格式
+        // 直接开始录制，不需要预先创建测试Tap
         Task { @MainActor in
-            do {
-                // 解析进程对象列表
-                let processObjectIDs = try await resolveProcessObjectIDs()
-                
-                // 创建Process Tap获取格式
-                let testTapManager = ProcessTapManager()
-                guard testTapManager.createProcessTap(for: processObjectIDs) else {
-                    self.callOnStatus("创建Process Tap失败")
-                    return
-                }
-                
-                guard testTapManager.readTapStreamFormat() else {
-                    self.callOnStatus("读取Tap格式失败")
-                    testTapManager.destroyProcessTap()
-                    return
-                }
-                
-                // 使用Tap格式创建音频文件
-                guard let tapFormat = testTapManager.streamFormat else {
-                    self.callOnStatus("无法获取Tap格式")
-                    testTapManager.destroyProcessTap()
-                    return
-                }
-                
-                // 销毁测试Tap
-                testTapManager.destroyProcessTap()
-                
-                // 创建匹配Tap格式的音频文件
-                self.createAudioFileWithTapFormat(tapFormat: tapFormat)
-                
-            } catch {
-                self.callOnStatus("初始化失败: \(error.localizedDescription)")
-                self.logger.error("初始化失败: \(error.localizedDescription)")
-            }
+            // 创建音频文件（使用默认格式）
+            self.createAudioFileWithTapFormat(tapFormat: nil)
         }
     }
     
-    private func createAudioFileWithTapFormat(tapFormat: AudioStreamBasicDescription) {
+    private func createAudioFileWithTapFormat(tapFormat: AudioStreamBasicDescription?) {
         logger.info("🎵 使用 AudioToolbox API 创建标准 WAV 文件")
-        logger.info("📊 Tap格式: 采样率=\(tapFormat.mSampleRate), 声道数=\(tapFormat.mChannelsPerFrame), 位深=\(tapFormat.mBitsPerChannel)")
+        
+        // 使用默认格式或提供的格式
+        let audioFormat: AudioStreamBasicDescription
+        if let tapFormat = tapFormat {
+            audioFormat = tapFormat
+            logger.info("📊 使用Tap格式: 采样率=\(tapFormat.mSampleRate), 声道数=\(tapFormat.mChannelsPerFrame), 位深=\(tapFormat.mBitsPerChannel)")
+        } else {
+            // 使用默认格式
+            audioFormat = AudioStreamBasicDescription(
+                mSampleRate: 48000.0,
+                mFormatID: kAudioFormatLinearPCM,
+                mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+                mBytesPerPacket: 4,
+                mFramesPerPacket: 1,
+                mBytesPerFrame: 4,
+                mChannelsPerFrame: 2,
+                mBitsPerChannel: 16,
+                mReserved: 0
+            )
+            logger.info("📊 使用默认格式: 48kHz, 16bit, 立体声")
+        }
         
         // 获取应用名称
         let appName = getTargetAppName()
@@ -227,7 +204,7 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
         
         do {
             // 创建 AudioToolbox 文件管理器
-            let audioToolboxManager = AudioToolboxFileManager(audioFormat: tapFormat)
+            let audioToolboxManager = AudioToolboxFileManager(audioFormat: audioFormat)
             try audioToolboxManager.createAudioFile(at: defaultURL)
             
             // 设置到回调处理器
@@ -269,24 +246,10 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
                 var success = false
                 var statusMessage = ""
                 
-                if self.targetPIDs.isEmpty {
-                    // 系统音频录制：尝试Swift API
-                    self.logger.info("🎯 系统音频录制，尝试Swift API")
-                    success = self.startRecordingWithSwiftAPI()
-                    if success {
-                        statusMessage = "已通过 Swift API 开始录制"
-                        self.logger.info("✅ 使用Swift API录制成功")
-                    } else {
-                        self.logger.warning("⚠️ Swift API失败，回退到C API")
-                        success = await self.startCoreAudioProcessTapCapture()
-                        statusMessage = success ? "已通过 C API 开始录制" : "CoreAudio Process Tap 初始化失败"
-                    }
-                } else {
-                    // 指定进程录制：使用C API
-                    self.logger.info("🎯 指定进程录制，使用C API")
-                    success = await self.startCoreAudioProcessTapCapture()
-                    statusMessage = success ? "已通过 C API 开始录制" : "CoreAudio Process Tap 初始化失败"
-                }
+                self.logger.info("🎯 开始录制，使用C API")
+                
+                success = await self.startCoreAudioProcessTapCapture()
+                statusMessage = success ? "已通过 C API 开始录制" : "CoreAudio Process Tap 初始化失败"
                 
                 if success {
                     self.levelMonitor.startMonitoring(source: .simulated)

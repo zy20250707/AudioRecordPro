@@ -12,8 +12,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     
     // MARK: - Application Lifecycle
+    
+    /// 清理日志文件，从0开始记录
+    private func clearLogFiles() {
+        let logDir = logger.getLogDirectoryURL()
+        
+        do {
+            let fileManager = FileManager.default
+            
+            // 检查日志目录是否存在
+            if fileManager.fileExists(atPath: logDir.path) {
+                // 获取目录中的所有文件
+                let logFiles = try fileManager.contentsOfDirectory(at: logDir, includingPropertiesForKeys: nil)
+                
+                // 删除所有日志文件
+                for fileURL in logFiles {
+                    try fileManager.removeItem(at: fileURL)
+                    print("🗑️ 已删除旧日志文件: \(fileURL.lastPathComponent)")
+                }
+                
+                print("✅ 所有旧日志文件已清理完成")
+            } else {
+                print("📁 日志目录不存在，无需清理")
+            }
+        } catch {
+            print("❌ 清理日志文件失败: \(error.localizedDescription)")
+        }
+    }
+    
     func applicationDidFinishLaunching(_ notification: Notification) {
         logger.info("应用程序启动完成")
+        
+        // 清理旧日志文件，从0开始记录
+        clearLogFiles()
         
         // 输出日志目录信息
         let logDir = logger.getLogDirectoryURL()

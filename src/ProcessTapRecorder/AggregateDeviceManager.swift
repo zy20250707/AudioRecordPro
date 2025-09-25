@@ -237,28 +237,7 @@ class AggregateDeviceManager {
         logger.info("AggregateDeviceManager: Block-based IO 回调已安装并启动")
         
         // 尝试强制激活聚合设备
-        logger.info("🔧 AggregateDeviceManager: 尝试强制激活聚合设备")
-        var deviceIsRunning: UInt32 = 1
-        var runningAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceIsRunning,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        
-        let runningStatus = AudioObjectSetPropertyData(
-            aggregateDeviceID,
-            &runningAddress,
-            0,
-            nil,
-            UInt32(MemoryLayout<UInt32>.size),
-            &deviceIsRunning
-        )
-        
-        if runningStatus == noErr {
-            logger.info("✅ AggregateDeviceManager: 聚合设备已强制激活")
-        } else {
-            logger.warning("⚠️ AggregateDeviceManager: 聚合设备强制激活失败: \(runningStatus)")
-        }
+        logger.info("🔧 AggregateDeviceManager: 聚合设备创建完成，等待系统自动激活")
         
         return true
     }

@@ -92,49 +92,12 @@ class ProcessTapManager {
             let status = createTap(desc, &tapID)
             
             if status != noErr || tapID == 0 {
-                logger.warning("⚠️ 多进程混音失败，尝试降级方案")
-                
-                // 降级方案1: 尝试单个进程
-                if processObjectIDs.count > 1 {
-                    logger.info("🔄 降级方案1: 尝试单个进程录制")
-                    for processObjectID in processObjectIDs {
-                        let singleDesc = CATapDescription(stereoMixdownOfProcesses: [processObjectID])
-                        singleDesc.uuid = uuid
-                        singleDesc.muteBehavior = .unmuted
-                        singleDesc.isExclusive = false
-                        singleDesc.isMixdown = true
-                        
-                        logger.info("📝 单进程Tap描述: 进程=\(processObjectID), UUID=\(uuid.uuidString)")
-                        
-                        let singleStatus = createTap(singleDesc, &tapID)
-                        if singleStatus == noErr && tapID != 0 {
-                            logger.info("✅ 降级方案1成功: 单进程录制 (PID=\(processObjectID))")
-                            self.processTapObjectID = tapID
-                            return true
-                        }
-                    }
-                }
-                
-                // 降级方案2: 尝试系统混音
-                logger.info("🔄 降级方案2: 尝试系统混音")
-                let systemDesc = CATapDescription(stereoMixdownOfProcesses: [])
-                systemDesc.uuid = uuid
-                systemDesc.muteBehavior = .unmuted
-                
-                logger.info("📝 系统混音Tap描述: UUID=\(uuid.uuidString), 静音行为=unmuted")
-                
-                let systemStatus = createTap(systemDesc, &tapID)
-                if systemStatus != noErr || tapID == 0 {
-                    logger.error("❌ ProcessTapManager: 所有方法都失败")
-                    logger.error("   多进程错误代码: OSStatus=\(status)")
-                    logger.error("   系统混音错误代码: OSStatus=\(systemStatus)")
-                    logger.error("   返回的Tap ID: \(tapID)")
-                    return false
-                } else {
-                    logger.info("✅ 降级方案2成功: 使用系统混音")
-                }
+                logger.error("❌ ProcessTapManager: 创建Process Tap失败")
+                logger.error("   错误代码: OSStatus=\(status)")
+                logger.error("   返回的Tap ID: \(tapID)")
+                return false
             } else {
-                logger.info("✅ 多进程混音成功: 录制 \(processObjectIDs.count) 个进程")
+                logger.info("✅ Process Tap创建成功: 录制 \(processObjectIDs.count) 个进程")
             }
             
             self.processTapObjectID = tapID
@@ -167,87 +130,8 @@ class ProcessTapManager {
             logger.warning("⚠️ 使用生成的UUID作为后备: \(uuid.uuidString)")
         }
         
-        // 尝试手动启动Process Tap
-        if let startTapSymbol = dlsym(handle, "AudioHardwareStartProcessTap") {
-            let startTap = unsafeBitCast(startTapSymbol, to: (@convention(c) (AudioObjectID, UnsafeMutablePointer<OSStatus>) -> OSStatus).self)
-            var startStatus: OSStatus = 0
-            startStatus = startTap(tapID, &startStatus)
-            if startStatus == noErr {
-                logger.info("✅ ProcessTapManager: Process Tap已手动启动")
-            } else {
-                logger.warning("⚠️ ProcessTapManager: Process Tap手动启动失败: \(startStatus)")
-            }
-        } else {
-            logger.warning("⚠️ ProcessTapManager: AudioHardwareStartProcessTap 符号不可用")
-        }
-        
-        // 尝试使用不同的启动方法
-        logger.info("🔧 ProcessTapManager: 尝试使用AudioDeviceStart启动Process Tap")
-        let deviceStartStatus = AudioDeviceStart(tapID, nil)
-        if deviceStartStatus == noErr {
-            logger.info("✅ ProcessTapManager: 使用AudioDeviceStart启动成功")
-        } else {
-            logger.warning("⚠️ ProcessTapManager: AudioDeviceStart启动失败: \(deviceStartStatus)")
-        }
-        
-        // 延迟激活方案：先创建Tap，稍后在聚合设备中激活
+        // Process Tap创建成功，等待聚合设备激活
         logger.info("🔧 ProcessTapManager: Process Tap已创建，等待聚合设备激活")
-        
-        // 检查Process Tap的属性状态
-        logger.info("🔍 ProcessTapManager: 检查Process Tap属性状态...")
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceIsRunning,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var isRunning: UInt32 = 0
-        var runningDataSize = UInt32(MemoryLayout<UInt32>.size)
-        let runningStatus = AudioObjectGetPropertyData(tapID, &address, 0, nil, &runningDataSize, &isRunning)
-        if runningStatus == noErr {
-            logger.info("📊 ProcessTapManager: Tap运行状态: \(isRunning == 1 ? "运行中" : "未运行")")
-        } else {
-            logger.warning("⚠️ ProcessTapManager: 无法获取Tap运行状态: \(runningStatus)")
-        }
-        
-        // 检查Process Tap是否在设备列表中
-        var deviceListSize: UInt32 = 0
-        var deviceListAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &deviceListAddress, 0, nil, &deviceListSize)
-        let deviceCount = Int(deviceListSize) / MemoryLayout<AudioDeviceID>.size
-        logger.info("📊 ProcessTapManager: 系统音频设备总数: \(deviceCount)")
-        
-        // 检查Tap是否在设备列表中
-        var deviceList = Array<AudioDeviceID>(repeating: 0, count: deviceCount)
-        let deviceListStatus = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &deviceListAddress, 0, nil, &deviceListSize, &deviceList)
-        if deviceListStatus == noErr {
-            let tapInList = deviceList.contains(tapID)
-            logger.info("📊 ProcessTapManager: Tap是否在设备列表中: \(tapInList ? "是" : "否")")
-        }
-        
-        // 尝试设置Process Tap为活跃状态
-        var kAudioTapPropertyIsActive = AudioObjectPropertyAddress(
-            mSelector: AudioUtils.kAudioTapPropertyIsActive,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var isActive: UInt32 = 1
-        let activeStatus = AudioObjectSetPropertyData(
-            tapID,
-            &kAudioTapPropertyIsActive,
-            0,
-            nil,
-            UInt32(MemoryLayout<UInt32>.size),
-            &isActive
-        )
-        if activeStatus == noErr {
-            logger.info("✅ ProcessTapManager: Process Tap已设置为活跃状态")
-        } else {
-            logger.warning("⚠️ ProcessTapManager: 设置Process Tap为活跃状态失败: \(activeStatus)")
-        }
         
         return true
     }
