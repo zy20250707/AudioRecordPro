@@ -120,6 +120,9 @@ class MainViewController: NSViewController {
         // 加载可用进程列表
         loadAvailableProcesses()
         
+        // 加载录音文件列表
+        loadRecordedFilesOnStartup()
+        
         // 清理旧日志
         logger.cleanupOldLogs()
         
@@ -728,6 +731,10 @@ extension MainViewController: MainWindowViewDelegate {
         refreshProcessList()
     }
     
+    func mainWindowViewDidRequestExportToMP3(_ view: MainWindowView, file: RecordedFileInfo) {
+        exportToMP3(file: file)
+    }
+    
     private func refreshProcessList() {
         logger.info("🔄 刷新进程列表...")
         mainWindowView.updateStatus("正在刷新进程列表...")
@@ -754,6 +761,93 @@ extension MainViewController: MainWindowViewDelegate {
                 }
             }
         }
+    }
+    
+    private func exportToMP3(file: RecordedFileInfo) {
+        logger.info("🎵 开始导出MP3: \(file.name)")
+        mainWindowView.updateStatus("正在导出MP3: \(file.name)...")
+        
+        // 检查原文件是否为WAV格式
+        guard file.url.pathExtension.lowercased() == "wav" else {
+            logger.warning("只能导出WAV文件为MP3格式")
+            mainWindowView.updateStatus("只能导出WAV文件为MP3格式")
+            return
+        }
+        
+        // 生成MP3文件路径（与原文件在同一目录）
+        let mp3URL = file.url.deletingPathExtension().appendingPathExtension("mp3")
+        
+        // 检查MP3文件是否已存在
+        if fileManager.fileExists(at: mp3URL) {
+            logger.info("MP3文件已存在: \(mp3URL.lastPathComponent)")
+            mainWindowView.updateStatus("MP3文件已存在: \(mp3URL.lastPathComponent)")
+            
+            // 在Finder中显示已存在的MP3文件
+            DispatchQueue.main.async {
+                NSWorkspace.shared.selectFile(mp3URL.path, inFileViewerRootedAtPath: mp3URL.deletingLastPathComponent().path)
+            }
+            return
+        }
+        
+        // 在后台线程执行转换
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            
+            do {
+                // 使用afconvert命令进行转换
+                let success = try self.convertWAVToMP3(inputURL: file.url, outputURL: mp3URL)
+                
+                DispatchQueue.main.async {
+                    if success {
+                        self.logger.info("✅ MP3导出成功: \(mp3URL.lastPathComponent)")
+                        self.mainWindowView.updateStatus("MP3导出成功: \(mp3URL.lastPathComponent)")
+                        
+                        // 在Finder中显示生成的MP3文件
+                        NSWorkspace.shared.selectFile(mp3URL.path, inFileViewerRootedAtPath: mp3URL.deletingLastPathComponent().path)
+                        
+                        // 刷新文件列表
+                        self.mainWindowView.refreshRecordedFiles()
+                    } else {
+                        self.logger.error("❌ MP3导出失败")
+                        self.mainWindowView.updateStatus("MP3导出失败")
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.logger.error("❌ MP3导出失败: \(error.localizedDescription)")
+                    self.mainWindowView.updateStatus("MP3导出失败: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+    
+    private func convertWAVToMP3(inputURL: URL, outputURL: URL) throws -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
+        
+        // afconvert参数：输入文件，输出文件，格式设置
+        // -f mp4f 表示MP3格式，-d aac 表示使用AAC编码（兼容MP3）
+        process.arguments = [
+            inputURL.path,
+            outputURL.path,
+            "-f", "mp4f",
+            "-d", "aac",
+            "-q", "127"  // 最高质量
+        ]
+        
+        logger.info("执行转换命令: afconvert \(process.arguments?.joined(separator: " ") ?? "")")
+        
+        try process.run()
+        process.waitUntilExit()
+        
+        let success = process.terminationStatus == 0
+        if success {
+            logger.info("afconvert执行成功，退出码: \(process.terminationStatus)")
+        } else {
+            logger.error("afconvert执行失败，退出码: \(process.terminationStatus)")
+        }
+        
+        return success
     }
     
     // MARK: - Process Selection Persistence
@@ -811,5 +905,88 @@ extension MainViewController: MainWindowViewDelegate {
         
         // 不恢复上次的选择状态，完全重置
         logger.info("📝 完全重置状态，不恢复上次选择")
+    }
+    
+    /// 启动时加载录音文件列表
+    private func loadRecordedFilesOnStartup() {
+        logger.info("开始加载录音文件列表...")
+        
+        // 在后台线程加载文件列表，避免阻塞UI
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            let recordingsPath = documentsPath.appendingPathComponent("AudioRecordings")
+            
+            var files: [RecordedFileInfo] = []
+            
+            do {
+                // 检查录音目录是否存在
+                if !FileManager.default.fileExists(atPath: recordingsPath.path) {
+                    DispatchQueue.main.async {
+                        self.logger.info("录音目录不存在，将在首次录制时创建")
+                        self.mainWindowView.updateStatus("准备就绪")
+                    }
+                    return
+                }
+                
+                let fileURLs = try FileManager.default.contentsOfDirectory(at: recordingsPath, includingPropertiesForKeys: [.fileSizeKey, .creationDateKey])
+                
+                for url in fileURLs {
+                    let resourceValues = try url.resourceValues(forKeys: [.fileSizeKey, .creationDateKey])
+                    let fileSize = resourceValues.fileSize ?? 0
+                    let creationDate = resourceValues.creationDate ?? Date()
+                    
+                    // 只处理音频文件
+                    let pathExtension = url.pathExtension.lowercased()
+                    guard ["wav", "m4a", "mp3"].contains(pathExtension) else {
+                        continue
+                    }
+                    
+                    // 获取音频文件时长
+                    let duration = self.getAudioFileDuration(url: url)
+                    
+                    let fileInfo = RecordedFileInfo(
+                        url: url,
+                        name: url.lastPathComponent,
+                        date: creationDate,
+                        duration: duration,
+                        size: Int64(fileSize)
+                    )
+                    
+                    files.append(fileInfo)
+                }
+                
+                // 按日期排序（最新的在前）
+                files.sort { $0.date > $1.date }
+                
+            } catch {
+                DispatchQueue.main.async {
+                    self.logger.error("加载录制文件失败: \(error.localizedDescription)")
+                    self.mainWindowView.updateStatus("加载录音文件失败")
+                }
+                return
+            }
+            
+            // 在主线程更新UI
+            DispatchQueue.main.async {
+                self.logger.info("✅ 启动时加载了 \(files.count) 个录音文件")
+                self.mainWindowView.updateStatus("已加载 \(files.count) 个录音文件")
+                
+                // 将文件列表传递给UI
+                self.mainWindowView.loadRecordedFiles(files)
+            }
+        }
+    }
+    
+    /// 获取音频文件时长
+    private func getAudioFileDuration(url: URL) -> TimeInterval {
+        do {
+            let audioFile = try AVAudioFile(forReading: url)
+            return Double(audioFile.length) / audioFile.fileFormat.sampleRate
+        } catch {
+            logger.warning("无法获取音频文件时长 \(url.lastPathComponent): \(error.localizedDescription)")
+            return 0
+        }
     }
 }

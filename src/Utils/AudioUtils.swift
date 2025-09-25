@@ -496,3 +496,17 @@ struct AudioFileInfo {
         return channels == 1 ? "单声道" : "立体声"
     }
 }
+
+// MARK: - Process Tap Constants
+/// CoreAudio Process Tap 相关常量定义
+extension AudioUtils {
+    
+    /// Process Tap 属性常量
+    static let kAudioTapPropertyUID: AudioObjectPropertySelector = AudioObjectPropertySelector(0x74706175) // 'tpau' - Tap Property UID
+    static let kAudioTapPropertyFormat: AudioObjectPropertySelector = AudioObjectPropertySelector(kAudioDevicePropertyStreamFormat) // 使用标准流格式属性
+    static let kAudioTapPropertyIsActive: AudioObjectPropertySelector = AudioObjectPropertySelector(0x74617061) // 'tapa' - Tap Property IsActive
+    
+    /// Process Tap 相关错误代码
+    static let kAudioTapErrorNotAvailable: OSStatus = OSStatus(0x7470616E) // 'tpan' - Tap Not Available
+    static let kAudioTapErrorAlreadyExists: OSStatus = OSStatus(0x74706165) // 'tpae' - Tap Already Exists
+}

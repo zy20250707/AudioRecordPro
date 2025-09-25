@@ -35,6 +35,16 @@ func globalAudioCallback(
     }
     CallCounter.count += 1
     
+    // 前几次回调都记录详细信息
+    if CallCounter.count <= 5 {
+        handler.logger.info("🎧 音频回调[\(CallCounter.count)]: device=\(inDevice), dataSize=\(buffer.mDataByteSize), channels=\(bufferList.mNumberBuffers)")
+    }
+    
+    // 每100次回调记录一次统计信息
+    if CallCounter.count % 100 == 1 && CallCounter.count > 5 {
+        handler.logger.info("🎧 音频回调统计: 总调用次数=\(CallCounter.count), 非零数据次数=\(CallCounter.nonZeroCount)")
+    }
+    
     // 记录非零数据大小的情况
     if buffer.mDataByteSize > 0 {
         CallCounter.lastNonZeroDataSize = buffer.mDataByteSize

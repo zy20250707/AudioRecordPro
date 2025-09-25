@@ -28,7 +28,7 @@ class SystemAudioRecorder: BaseAudioRecorder {
             return
         }
         
-        let url = fileManager.getRecordingFileURL(format: currentFormat.fileExtension)
+        let url = fileManager.getRecordingFileURL(recordingMode: recordingMode, format: currentFormat.fileExtension)
         logger.info("开始录制，模式: \(recordingMode.rawValue), 格式: \(currentFormat.rawValue)")
         
         do {

@@ -177,9 +177,8 @@ class BaseAudioRecorder: NSObject, AudioRecorderProtocol {
     /// 创建音频文件（支持沙盒环境，使用自定义设置）
     func createAudioFileWithSandboxSupportAndSettings(settings: [String: Any], completion: @escaping (Result<URL, Error>) -> Void) {
         // 生成文件名（使用PCM格式）
-        let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-        let fileName = "record_\(timestamp).wav"
-        let defaultURL = fileManager.getRecordingFileURL(format: "wav")
+        let defaultURL = fileManager.getRecordingFileURL(recordingMode: recordingMode, format: "wav")
+        let fileName = defaultURL.lastPathComponent
         
         do {
             // 强制使用标准PCM格式，避免Apple的FLLR块

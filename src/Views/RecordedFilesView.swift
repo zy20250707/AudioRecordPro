@@ -35,6 +35,7 @@ struct RecordedFileInfo {
 protocol RecordedFilesViewDelegate: AnyObject {
     func recordedFilesViewDidSelectFile(_ view: RecordedFilesView, file: RecordedFileInfo)
     func recordedFilesViewDidDoubleClickFile(_ view: RecordedFilesView, file: RecordedFileInfo)
+    func recordedFilesViewDidRequestExportToMP3(_ view: RecordedFilesView, file: RecordedFileInfo)
 }
 
 // MARK: - RecordedFilesView
@@ -45,10 +46,12 @@ class RecordedFilesView: NSView {
     private let scrollView = NSScrollView()
     private let tableView = NSTableView()
     private let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("FileColumn"))
+    private let exportButton = NSButton()
     
     // MARK: - Properties
     weak var delegate: RecordedFilesViewDelegate?
     private var recordedFiles: [RecordedFileInfo] = []
+    private var selectedFile: RecordedFileInfo?
     private let logger = Logger.shared
     
     // MARK: - Initialization
@@ -70,6 +73,7 @@ class RecordedFilesView: NSView {
         layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
         
         setupTableView()
+        setupExportButton()
         setupConstraints()
     }
     
@@ -103,12 +107,30 @@ class RecordedFilesView: NSView {
         addSubview(scrollView)
     }
     
+    private func setupExportButton() {
+        // 配置导出按钮
+        exportButton.title = "生成 MP3"
+        exportButton.target = self
+        exportButton.action = #selector(exportButtonClicked)
+        exportButton.isEnabled = false
+        exportButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        addSubview(exportButton)
+    }
+    
     private func setupConstraints() {
         NSLayoutConstraint.activate([
+            // 表格视图约束
             scrollView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8)
+            scrollView.bottomAnchor.constraint(equalTo: exportButton.topAnchor, constant: -8),
+            
+            // 导出按钮约束
+            exportButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            exportButton.centerXAnchor.constraint(equalTo: centerXAnchor),
+            exportButton.widthAnchor.constraint(equalToConstant: 100),
+            exportButton.heightAnchor.constraint(equalToConstant: 28)
         ])
     }
     
@@ -124,6 +146,13 @@ class RecordedFilesView: NSView {
     func addRecordedFile(_ file: RecordedFileInfo) {
         recordedFiles.insert(file, at: 0) // 新文件添加到顶部
         tableView.insertRows(at: IndexSet(integer: 0), withAnimation: .slideDown)
+    }
+    
+    /// 加载录音文件列表（启动时使用）
+    func loadRecordedFiles(_ files: [RecordedFileInfo]) {
+        recordedFiles = files
+        tableView.reloadData()
+        logger.info("已加载 \(files.count) 个录音文件到列表")
     }
     
     // MARK: - Private Methods
@@ -183,6 +212,11 @@ class RecordedFilesView: NSView {
         let file = recordedFiles[selectedRow]
         delegate?.recordedFilesViewDidDoubleClickFile(self, file: file)
     }
+    
+    @objc private func exportButtonClicked() {
+        guard let selectedFile = selectedFile else { return }
+        delegate?.recordedFilesViewDidRequestExportToMP3(self, file: selectedFile)
+    }
 }
 
 // MARK: - NSTableViewDataSource
@@ -208,10 +242,14 @@ extension RecordedFilesView: NSTableViewDelegate {
     
     func tableViewSelectionDidChange(_ notification: Notification) {
         let selectedRow = tableView.selectedRow
-        guard selectedRow >= 0 && selectedRow < recordedFiles.count else { return }
-        
-        let file = recordedFiles[selectedRow]
-        delegate?.recordedFilesViewDidSelectFile(self, file: file)
+        if selectedRow >= 0 && selectedRow < recordedFiles.count {
+            selectedFile = recordedFiles[selectedRow]
+            exportButton.isEnabled = true
+            delegate?.recordedFilesViewDidSelectFile(self, file: selectedFile!)
+        } else {
+            selectedFile = nil
+            exportButton.isEnabled = false
+        }
     }
 }
 

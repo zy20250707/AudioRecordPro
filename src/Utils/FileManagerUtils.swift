@@ -32,17 +32,52 @@ class FileManagerUtils {
         }
     }
     
-    /// 生成录音文件名
+    /// 生成录音文件名（旧版本，保持兼容性）
     func generateRecordingFileName(format: String) -> String {
         let dateFormatter = ISO8601DateFormatter()
         let timestamp = dateFormatter.string(from: Date()).replacingOccurrences(of: ":", with: "-")
         return "record_\(timestamp).\(format.lowercased())"
     }
     
-    /// 获取录音文件完整路径
+    /// 生成新的录音文件名（应用名称+时间日期格式）
+    func generateRecordingFileName(recordingMode: AudioUtils.RecordingMode, appName: String? = nil, format: String) -> String {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        let timestamp = dateFormatter.string(from: Date())
+        
+        let sourceName: String
+        switch recordingMode {
+        case .microphone:
+            sourceName = "麦克风"
+        case .systemMixdown:
+            sourceName = "系统音频输出"
+        case .specificProcess:
+            if let appName = appName, !appName.isEmpty {
+                sourceName = appName
+            } else {
+                sourceName = "应用音频"
+            }
+        }
+        
+        // 清理文件名中的非法字符
+        let cleanSourceName = sourceName.replacingOccurrences(of: "/", with: "_")
+                                      .replacingOccurrences(of: ":", with: "_")
+                                      .replacingOccurrences(of: " ", with: "_")
+        
+        return "\(cleanSourceName)_\(timestamp).\(format.lowercased())"
+    }
+    
+    /// 获取录音文件完整路径（旧版本）
     func getRecordingFileURL(format: String) -> URL {
         let directory = getRecordingsDirectory()
         let filename = generateRecordingFileName(format: format)
+        return directory.appendingPathComponent(filename)
+    }
+    
+    /// 获取录音文件完整路径（新版本）
+    func getRecordingFileURL(recordingMode: AudioUtils.RecordingMode, appName: String? = nil, format: String) -> URL {
+        let directory = getRecordingsDirectory()
+        let filename = generateRecordingFileName(recordingMode: recordingMode, appName: appName, format: format)
         return directory.appendingPathComponent(filename)
     }
     

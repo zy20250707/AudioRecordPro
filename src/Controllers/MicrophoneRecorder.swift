@@ -28,7 +28,7 @@ class MicrophoneRecorder: BaseAudioRecorder {
         
         // 若使用PCM调试写入，强制使用 .wav 扩展名，避免后续读取/播放因扩展名与容器不符报错
         let targetExtension = forcePCMForDebug ? "wav" : currentFormat.fileExtension
-        let url = fileManager.getRecordingFileURL(format: targetExtension)
+        let url = fileManager.getRecordingFileURL(recordingMode: recordingMode, format: targetExtension)
         logger.info("开始录制，模式: \(recordingMode.rawValue), 格式: \(currentFormat.rawValue)")
         
         do {

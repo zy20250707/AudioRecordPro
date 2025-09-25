@@ -10,15 +10,15 @@ class ProcessTapManager {
     // MARK: - Properties
     private let logger = Logger.shared
     private var processTapObjectID: AudioObjectID = 0
-    private var tapUUID: CFString?
+    var uuid: CFString?
     private var streamFormatASBD: AudioStreamBasicDescription?
     
     // MARK: - Public Methods
     
-    /// 创建 Process Tap
-    func createProcessTap(for processObjectID: AudioObjectID) -> Bool {
+    /// 创建 Process Tap（支持多进程混音）
+    func createProcessTap(for processObjectIDs: [AudioObjectID]) -> Bool {
         logger.info("🔧 ProcessTapManager: 开始创建Process Tap...")
-        logger.info("🎯 目标进程对象ID: \(processObjectID)")
+        logger.info("🎯 目标进程对象ID列表: \(processObjectIDs)")
         
         // 动态符号声明
         typealias CreateTapFn = @convention(c) (CATapDescription, UnsafeMutablePointer<AudioObjectID>) -> OSStatus
@@ -38,31 +38,68 @@ class ProcessTapManager {
         let uuid = UUID()
         logger.info("🔑 生成Tap UUID: \(uuid.uuidString)")
         
-        if processObjectID == kAudioObjectSystemObject {
-            // 暂时跳过系统对象，避免段错误
-            logger.warning("⚠️ ProcessTapManager: 系统对象暂不支持，跳过Tap创建")
-            return false
-        } else {
-            // 录制特定进程 - 尝试多种配置方式
-            logger.info("🎯 ProcessTapManager: 为特定进程创建Tap: \(processObjectID)")
+        var tapID: AudioObjectID = 0
+        
+        // 检查是否为空列表（系统混音）
+        if processObjectIDs.isEmpty {
+            logger.info("🎯 ProcessTapManager: 创建系统混音Tap")
+            // 系统混音录制
+            let systemDesc = CATapDescription(stereoMixdownOfProcesses: [])
+            systemDesc.uuid = uuid
+            systemDesc.muteBehavior = .unmuted
             
-            // 方法1: 尝试 stereoMixdownOfProcesses (参考AudioCap和audio-rec)
-            logger.info("🔧 尝试方法1: stereoMixdownOfProcesses")
-            let desc = CATapDescription(stereoMixdownOfProcesses: [processObjectID])
+            logger.info("📝 系统混音Tap描述: UUID=\(uuid.uuidString), 静音行为=unmuted")
+            
+            let systemStatus = createTap(systemDesc, &tapID)
+            if systemStatus != noErr || tapID == 0 {
+                logger.error("❌ ProcessTapManager: 系统混音Tap创建失败: OSStatus=\(systemStatus)")
+                return false
+            } else {
+                logger.info("✅ 系统混音Tap创建成功")
+            }
+            self.processTapObjectID = tapID
+        } else {
+            // 录制特定进程（支持多进程混音）
+            logger.info("🎯 ProcessTapManager: 为进程列表创建Tap: \(processObjectIDs)")
+            
+            // 方法1: 尝试 stereoMixdownOfProcesses (支持多进程)
+            logger.info("🔧 尝试方法1: stereoMixdownOfProcesses (多进程混音)")
+            let desc = CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
             desc.uuid = uuid
             desc.muteBehavior = .unmuted
             desc.isExclusive = false  // 参考audio-rec
             desc.isMixdown = true     // 参考audio-rec
             
-            logger.info("📝 Tap描述: 进程列表=[\(processObjectID)], UUID=\(uuid.uuidString), 静音行为=unmuted, 独占=\(desc.isExclusive), 混音=\(desc.isMixdown)")
+            logger.info("📝 Tap描述: 进程列表=\(processObjectIDs), UUID=\(uuid.uuidString), 静音行为=unmuted, 独占=\(desc.isExclusive), 混音=\(desc.isMixdown)")
             
-            var tapID: AudioObjectID = 0
             let status = createTap(desc, &tapID)
             
             if status != noErr || tapID == 0 {
-                logger.warning("⚠️ 方法1失败，尝试方法2: 系统混音")
+                logger.warning("⚠️ 多进程混音失败，尝试降级方案")
                 
-                // 方法2: 尝试系统混音
+                // 降级方案1: 尝试单个进程
+                if processObjectIDs.count > 1 {
+                    logger.info("🔄 降级方案1: 尝试单个进程录制")
+                    for processObjectID in processObjectIDs {
+                        let singleDesc = CATapDescription(stereoMixdownOfProcesses: [processObjectID])
+                        singleDesc.uuid = uuid
+                        singleDesc.muteBehavior = .unmuted
+                        singleDesc.isExclusive = false
+                        singleDesc.isMixdown = true
+                        
+                        logger.info("📝 单进程Tap描述: 进程=\(processObjectID), UUID=\(uuid.uuidString)")
+                        
+                        let singleStatus = createTap(singleDesc, &tapID)
+                        if singleStatus == noErr && tapID != 0 {
+                            logger.info("✅ 降级方案1成功: 单进程录制 (PID=\(processObjectID))")
+                            self.processTapObjectID = tapID
+                            return true
+                        }
+                    }
+                }
+                
+                // 降级方案2: 尝试系统混音
+                logger.info("🔄 降级方案2: 尝试系统混音")
                 let systemDesc = CATapDescription(stereoMixdownOfProcesses: [])
                 systemDesc.uuid = uuid
                 systemDesc.muteBehavior = .unmuted
@@ -72,25 +109,27 @@ class ProcessTapManager {
                 let systemStatus = createTap(systemDesc, &tapID)
                 if systemStatus != noErr || tapID == 0 {
                     logger.error("❌ ProcessTapManager: 所有方法都失败")
-                    logger.error("   方法1错误代码: OSStatus=\(status)")
-                    logger.error("   方法2错误代码: OSStatus=\(systemStatus)")
+                    logger.error("   多进程错误代码: OSStatus=\(status)")
+                    logger.error("   系统混音错误代码: OSStatus=\(systemStatus)")
                     logger.error("   返回的Tap ID: \(tapID)")
                     return false
                 } else {
-                    logger.info("✅ 方法2成功: 使用系统混音")
+                    logger.info("✅ 降级方案2成功: 使用系统混音")
                 }
             } else {
-                logger.info("✅ 方法1成功: 使用特定进程")
+                logger.info("✅ 多进程混音成功: 录制 \(processObjectIDs.count) 个进程")
             }
             
-        self.processTapObjectID = tapID
+            self.processTapObjectID = tapID
+        }
+        
         logger.info("🎉 ProcessTapManager: Process Tap创建成功!")
         logger.info("   Tap ID: \(tapID)")
         logger.info("   生成的UUID: \(uuid.uuidString)")
         
         // 获取Process Tap的真实UID
         var tapUIDProperty = AudioObjectPropertyAddress(
-            mSelector: kAudioTapPropertyUID,
+            mSelector: AudioUtils.kAudioTapPropertyUID,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
@@ -102,12 +141,12 @@ class ProcessTapManager {
         }
         
         if uidStatus == noErr, let realTapUID = tapUID {
-            self.tapUUID = realTapUID
+            self.uuid = realTapUID
             logger.info("✅ 获取到Tap真实UID: \(realTapUID)")
         } else {
             logger.error("❌ 无法获取Tap真实UID: \(uidStatus)")
             // 作为后备方案，使用生成的UUID
-            self.tapUUID = uuid.uuidString as CFString
+            self.uuid = uuid.uuidString as CFString
             logger.warning("⚠️ 使用生成的UUID作为后备: \(uuid.uuidString)")
         }
         
@@ -125,9 +164,53 @@ class ProcessTapManager {
             logger.warning("⚠️ ProcessTapManager: AudioHardwareStartProcessTap 符号不可用")
         }
         
+        // 尝试使用不同的启动方法
+        logger.info("🔧 ProcessTapManager: 尝试使用AudioDeviceStart启动Process Tap")
+        let deviceStartStatus = AudioDeviceStart(tapID, nil)
+        if deviceStartStatus == noErr {
+            logger.info("✅ ProcessTapManager: 使用AudioDeviceStart启动成功")
+        } else {
+            logger.warning("⚠️ ProcessTapManager: AudioDeviceStart启动失败: \(deviceStartStatus)")
+        }
+        
+        // 检查Process Tap的属性状态
+        logger.info("🔍 ProcessTapManager: 检查Process Tap属性状态...")
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsRunning,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var isRunning: UInt32 = 0
+        var runningDataSize = UInt32(MemoryLayout<UInt32>.size)
+        let runningStatus = AudioObjectGetPropertyData(tapID, &address, 0, nil, &runningDataSize, &isRunning)
+        if runningStatus == noErr {
+            logger.info("📊 ProcessTapManager: Tap运行状态: \(isRunning == 1 ? "运行中" : "未运行")")
+        } else {
+            logger.warning("⚠️ ProcessTapManager: 无法获取Tap运行状态: \(runningStatus)")
+        }
+        
+        // 检查Process Tap是否在设备列表中
+        var deviceListSize: UInt32 = 0
+        var deviceListAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &deviceListAddress, 0, nil, &deviceListSize)
+        let deviceCount = Int(deviceListSize) / MemoryLayout<AudioDeviceID>.size
+        logger.info("📊 ProcessTapManager: 系统音频设备总数: \(deviceCount)")
+        
+        // 检查Tap是否在设备列表中
+        var deviceList = Array<AudioDeviceID>(repeating: 0, count: deviceCount)
+        let deviceListStatus = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &deviceListAddress, 0, nil, &deviceListSize, &deviceList)
+        if deviceListStatus == noErr {
+            let tapInList = deviceList.contains(tapID)
+            logger.info("📊 ProcessTapManager: Tap是否在设备列表中: \(tapInList ? "是" : "否")")
+        }
+        
         // 尝试设置Process Tap为活跃状态
         var kAudioTapPropertyIsActive = AudioObjectPropertyAddress(
-            mSelector: UInt32(0x74617061), // 'tapa' - 假设的IsActive属性
+            mSelector: AudioUtils.kAudioTapPropertyIsActive,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
@@ -147,7 +230,6 @@ class ProcessTapManager {
         }
         
         return true
-        }
     }
     
     /// 读取 Tap 流格式
@@ -160,7 +242,7 @@ class ProcessTapManager {
         
         logger.info("🔍 查询Tap属性: kAudioTapPropertyFormat")
         var address = AudioObjectPropertyAddress(
-            mSelector: kAudioTapPropertyFormat,
+            mSelector: AudioUtils.kAudioTapPropertyFormat,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
@@ -168,10 +250,23 @@ class ProcessTapManager {
         var dataSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         let status = AudioObjectGetPropertyData(processTapObjectID, &address, 0, nil, &dataSize, &asbd)
         if status != noErr {
-            logger.error("❌ ProcessTapManager: 读取kAudioTapPropertyFormat失败")
-            logger.error("   错误代码: OSStatus=\(status)")
-            logger.error("   Tap ID: \(processTapObjectID)")
-            return false
+            logger.warning("⚠️ ProcessTapManager: 读取kAudioTapPropertyFormat失败，使用默认格式")
+            logger.warning("   错误代码: OSStatus=\(status)")
+            logger.warning("   Tap ID: \(processTapObjectID)")
+            
+            // 使用默认的音频格式
+            asbd = AudioStreamBasicDescription(
+                mSampleRate: 48000.0,
+                mFormatID: kAudioFormatLinearPCM,
+                mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+                mBytesPerPacket: 4,
+                mFramesPerPacket: 1,
+                mBytesPerFrame: 4,
+                mChannelsPerFrame: 2,
+                mBitsPerChannel: 16,
+                mReserved: 0
+            )
+            logger.info("📊 使用默认音频格式: 48kHz, 16bit, 立体声")
         }
         
         self.streamFormatASBD = asbd
@@ -208,7 +303,7 @@ class ProcessTapManager {
             processTapObjectID = 0
         }
         
-        tapUUID = nil
+        self.uuid = nil
         streamFormatASBD = nil
     }
     
@@ -218,8 +313,8 @@ class ProcessTapManager {
         return processTapObjectID
     }
     
-    var uuid: CFString? {
-        return tapUUID
+    var tapUUIDProperty: CFString? {
+        return self.uuid
     }
     
     var streamFormat: AudioStreamBasicDescription? {

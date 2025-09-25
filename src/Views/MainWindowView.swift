@@ -157,6 +157,14 @@ class MainWindowView: NSView {
     func addRecordedFile(_ file: RecordedFileInfo) {
         sidebarView.addRecordedFile(file)
     }
+    
+    func refreshRecordedFiles() {
+        sidebarView.refreshRecordedFiles()
+    }
+    
+    func loadRecordedFiles(_ files: [RecordedFileInfo]) {
+        sidebarView.loadRecordedFiles(files)
+    }
 }
 
 // MARK: - SidebarViewDelegate
@@ -175,8 +183,13 @@ extension MainWindowView: SidebarViewDelegate {
     }
     
     func sidebarViewDidDoubleClickFile(_ view: SidebarView, file: RecordedFileInfo) {
-        // 从Finder中打开文件
-        NSWorkspace.shared.open(file.url)
+        // 在Finder中打开文件所在目录并选中该文件
+        NSWorkspace.shared.selectFile(file.url.path, inFileViewerRootedAtPath: file.url.deletingLastPathComponent().path)
+    }
+    
+    func sidebarViewDidRequestExportToMP3(_ view: SidebarView, file: RecordedFileInfo) {
+        // 导出为MP3格式
+        delegate?.mainWindowViewDidRequestExportToMP3(self, file: file)
     }
 }
 
@@ -210,4 +223,5 @@ protocol MainWindowViewDelegate: AnyObject {
     func mainWindowViewDidStopPlayback(_ view: MainWindowView)
     func mainWindowViewDidSelectProcesses(_ view: MainWindowView, pids: [pid_t])
     func mainWindowViewDidRequestProcessRefresh(_ view: MainWindowView)
+    func mainWindowViewDidRequestExportToMP3(_ view: MainWindowView, file: RecordedFileInfo)
 }

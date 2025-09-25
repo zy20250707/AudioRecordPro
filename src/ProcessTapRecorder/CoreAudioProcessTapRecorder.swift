@@ -12,6 +12,8 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
     // MARK: - Properties
     /// 目标进程 PID；为 nil 时表示"系统混音"目标
     private var targetPID: pid_t?
+    /// 多进程录制支持
+    private var targetPIDs: [pid_t] = []
     
     // 组件管理器
     private let processEnumerator = AudioProcessEnumerator()
@@ -29,10 +31,40 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
     func setTargetPID(_ pid: pid_t?) {
         targetPID = pid  // 使用指定的进程PID进行录制
         if let pid = pid {
+            targetPIDs = [pid]  // 更新多进程列表
             logger.info("🎯 设置目标进程PID: \(pid)")
         } else {
-            logger.info("🎯 未指定目标进程，将自动选择音频播放应用")
+            targetPIDs = []  // 清空多进程列表，使用系统混音
+            logger.info("🎯 未指定目标进程，将使用系统混音")
         }
+    }
+    
+    /// 设置多进程录制（新增方法）
+    func setTargetPIDs(_ pids: [pid_t]) {
+        targetPIDs = pids
+        if pids.count == 1 {
+            targetPID = pids.first
+        } else {
+            targetPID = nil  // 多进程时清空单个PID
+        }
+        
+        if pids.isEmpty {
+            logger.info("🎯 设置多进程录制: 系统混音")
+        } else {
+            logger.info("🎯 设置多进程录制: \(pids.count) 个进程 - \(pids)")
+        }
+    }
+    
+    /// 获取目标应用名称
+    private func getTargetAppName() -> String? {
+        if let pid = targetPID {
+            // 通过PID查找应用名称
+            let processes = processEnumerator.getAvailableAudioProcesses()
+            if let process = processes.first(where: { $0.pid == pid }) {
+                return process.name
+            }
+        }
+        return nil
     }
     
     // MARK: - Recording
@@ -50,12 +82,12 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
         // 步骤1: 先创建Process Tap获取格式
         Task { @MainActor in
             do {
-                // 解析进程对象
-                let processObjectID = try await resolveProcessObjectID()
+                // 解析进程对象列表
+                let processObjectIDs = try await resolveProcessObjectIDs()
                 
                 // 创建Process Tap获取格式
                 let testTapManager = ProcessTapManager()
-                guard testTapManager.createProcessTap(for: processObjectID) else {
+                guard testTapManager.createProcessTap(for: processObjectIDs) else {
                     self.callOnStatus("创建Process Tap失败")
                     return
                 }
@@ -90,10 +122,12 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
         logger.info("🎵 使用 AudioToolbox API 创建标准 WAV 文件")
         logger.info("📊 Tap格式: 采样率=\(tapFormat.mSampleRate), 声道数=\(tapFormat.mChannelsPerFrame), 位深=\(tapFormat.mBitsPerChannel)")
         
+        // 获取应用名称
+        let appName = getTargetAppName()
+        
         // 生成文件名
-        let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-        let fileName = "record_\(timestamp).wav"
-        let defaultURL = fileManager.getRecordingFileURL(format: "wav")
+        let defaultURL = fileManager.getRecordingFileURL(recordingMode: recordingMode, appName: appName, format: "wav")
+        let fileName = defaultURL.lastPathComponent
         
         do {
             // 创建 AudioToolbox 文件管理器
@@ -242,7 +276,7 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
             // 测试步骤2: 创建Process Tap
             logger.info("🔧 测试步骤2: 创建Process Tap...")
             let testTapManager = ProcessTapManager()
-            guard testTapManager.createProcessTap(for: processObjectID) else {
+            guard testTapManager.createProcessTap(for: [processObjectID]) else {
                 logger.error("❌ 步骤2测试失败: 无法创建Process Tap")
                 return false
             }
@@ -296,18 +330,18 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
         let tStart = Date()
         
         do {
-            // 步骤 1: 解析目标进程对象
+            // 步骤 1: 解析目标进程对象列表
             let t1 = Date()
-            logger.info("🔍 步骤1: 开始解析目标进程对象...")
-            let processObjectID = try await resolveProcessObjectID()
-            logger.info("✅ 步骤1完成: 进程对象ID=\(processObjectID), 用时 \(String(format: "%.2fms", Date().timeIntervalSince(t1)*1000))")
+            logger.info("🔍 步骤1: 开始解析目标进程对象列表...")
+            let processObjectIDs = try await resolveProcessObjectIDs()
+            logger.info("✅ 步骤1完成: 进程对象ID列表=\(processObjectIDs), 用时 \(String(format: "%.2fms", Date().timeIntervalSince(t1)*1000))")
             
             // 步骤 2: 创建 Process Tap
             let t2 = Date()
             logger.info("🔧 步骤2: 开始创建Process Tap...")
             processTapManager = ProcessTapManager()
             guard let tapManager = processTapManager,
-                  tapManager.createProcessTap(for: processObjectID) else {
+                  tapManager.createProcessTap(for: processObjectIDs) else {
                 let errorMsg = "❌ 步骤2失败: 创建Process Tap失败（可能SDK未提供符号或进程不可录制）"
                 logger.error(errorMsg)
                 callOnStatus(errorMsg)
@@ -393,47 +427,51 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
     }
     
     @available(macOS 14.4, *)
-    private func resolveProcessObjectID() async throws -> AudioObjectID {
-        var pid: pid_t?
+    private func resolveProcessObjectIDs() async throws -> [AudioObjectID] {
+        var processObjectIDs: [AudioObjectID] = []
         
-        if let specified = targetPID {
-            pid = specified
-            logger.info("🎯 使用指定的目标PID: \(specified)")
+        if !targetPIDs.isEmpty {
+            // 使用指定的多个PID
+            logger.info("🎯 使用指定的目标PID列表: \(targetPIDs)")
+            for pid in targetPIDs {
+                if let processObjectID = processEnumerator.findProcessObjectID(by: pid) {
+                    processObjectIDs.append(processObjectID)
+                    logger.info("✅ 找到进程对象ID: PID=\(pid) -> ObjectID=\(processObjectID)")
+                } else {
+                    logger.warning("⚠️ 未找到PID=\(pid)对应的进程对象，跳过")
+                }
+            }
+            
+            if processObjectIDs.isEmpty {
+                throw NSError(domain: "CoreAudioProcessTapRecorder", code: -2, userInfo: [NSLocalizedDescriptionKey: "所有指定的PID都无法找到对应的进程对象"])
+            }
         } else {
-            // 未指定 PID，使用系统混音
+            // 未指定PID，使用系统混音
             logger.info("🔍 未指定PID，使用系统混音录制...")
-            pid = processEnumerator.resolveDefaultSystemMixPID()
-            if let systemPid = pid {
+            if let systemPid = processEnumerator.resolveDefaultSystemMixPID() {
                 logger.info("✅ 找到系统混音PID: \(systemPid)")
+                if let processObjectID = processEnumerator.findProcessObjectID(by: systemPid) {
+                    processObjectIDs.append(processObjectID)
+                }
             } else {
-                logger.info("⚠️ 未找到系统混音，使用当前应用程序PID: \(getpid())")
-                pid = getpid()
+                logger.info("⚠️ 未找到系统混音，返回空列表使用系统混音")
+                // 返回空列表，表示系统混音
             }
         }
         
-        // 如果指定了PID，尝试查找对应的进程对象
-        if let pid = pid {
-            logger.info("🔍 开始查找PID=\(pid)对应的音频进程对象...")
-            
-            // 尝试通过进程枚举器查找进程对象 ID
-            if let processObjectID = processEnumerator.findProcessObjectID(by: pid) {
-                logger.info("✅ 成功找到进程对象ID: \(processObjectID) (PID: \(pid))")
-                return processObjectID
-            }
-            
-            logger.warning("⚠️ 未找到指定PID=\(pid)的音频进程，开始枚举所有可用进程...")
+        return processObjectIDs
+    }
+    
+    @available(macOS 14.4, *)
+    private func resolveProcessObjectID() async throws -> AudioObjectID {
+        // 兼容性方法，返回第一个进程对象ID
+        let processObjectIDs = try await resolveProcessObjectIDs()
+        if let firstObjectID = processObjectIDs.first {
+            return firstObjectID
+        } else {
+            // 系统混音情况，返回系统对象ID
+            return AudioObjectID(kAudioObjectSystemObject)
         }
-        
-        // 如果找不到特定进程，尝试选择一个可用的进程
-        let availableProcesses = processEnumerator.getAvailableAudioProcesses()
-        logger.info("📋 发现 \(availableProcesses.count) 个可用音频进程:")
-        
-        for (index, process) in availableProcesses.enumerated() {
-            logger.info("   [\(index)] \(process.name) (PID: \(process.pid), Bundle: \(process.bundleID))")
-        }
-        
-        // 如果没有指定PID，不允许自动选择，必须明确指定录制目标
-        throw NSError(domain: "CoreAudioProcessTapRecorder", code: -1, userInfo: [NSLocalizedDescriptionKey: "未指定录制目标进程，请先选择要录制的进程"])
     }
     
     // MARK: - Static Audio Callback
@@ -445,3 +483,4 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
         return noErr
     }
 }
+

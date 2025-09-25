@@ -7,6 +7,7 @@ protocol SidebarViewDelegate: AnyObject {
     func sidebarViewDidSelectProcesses(_ view: SidebarView, pids: [pid_t])
     func sidebarViewDidRequestProcessRefresh(_ view: SidebarView)
     func sidebarViewDidDoubleClickFile(_ view: SidebarView, file: RecordedFileInfo)
+    func sidebarViewDidRequestExportToMP3(_ view: SidebarView, file: RecordedFileInfo)
 }
 
 // MARK: - SidebarView
@@ -238,6 +239,11 @@ class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate, TabContai
         delegate?.sidebarViewDidDoubleClickFile(self, file: file)
     }
     
+    func recordedFilesViewDidRequestExportToMP3(_ view: RecordedFilesView, file: RecordedFileInfo) {
+        // 导出为MP3格式
+        delegate?.sidebarViewDidRequestExportToMP3(self, file: file)
+    }
+    
     
     // MARK: - Public Methods
     func updateProcessList(_ processes: [AudioProcessInfo]) {
@@ -442,6 +448,11 @@ class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate, TabContai
     /// 刷新已录制文件列表
     func refreshRecordedFiles() {
         recordedFilesView.refreshFiles()
+    }
+    
+    /// 加载录音文件列表（启动时使用）
+    func loadRecordedFiles(_ files: [RecordedFileInfo]) {
+        recordedFilesView.loadRecordedFiles(files)
     }
     
     /// 添加新的录制文件到列表

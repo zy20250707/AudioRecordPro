@@ -87,6 +87,18 @@ class AudioRecorderController: NSObject {
         }
     }
     
+    /// 设置多进程录制（新增方法）
+    func setCoreAudioTargetPIDs(_ pids: [pid_t]) {
+        logger.info("CoreAudio 目标 PID 列表已设置为: \(pids)")
+        
+        if #available(macOS 14.4, *) {
+            if let core = currentRecorder as? CoreAudioProcessTapRecorder {
+                core.setTargetPIDs(pids)
+                logger.info("CoreAudio 目标 PID 列表已应用到当前录制器: \(pids)")
+            }
+        }
+    }
+    
     // MARK: - Private Methods
     private func setupRecorder() {
         guard !isRunning else {
