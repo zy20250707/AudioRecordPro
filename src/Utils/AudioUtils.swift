@@ -508,5 +508,8 @@ extension AudioUtils {
     
     /// Process Tap 相关错误代码
     static let kAudioTapErrorNotAvailable: OSStatus = OSStatus(0x7470616E) // 'tpan' - Tap Not Available
+    
+    /// Aggregate Device 相关常量
+    static let kAudioAggregateDevicePropertyTapAutoStart: AudioObjectPropertySelector = AudioObjectPropertySelector(0x74617073) // 'taps' - Tap Auto Start
     static let kAudioTapErrorAlreadyExists: OSStatus = OSStatus(0x74706165) // 'tpae' - Tap Already Exists
 }

@@ -63,6 +63,22 @@ class AggregateDeviceManager {
         self.aggregateDeviceID = aggID
         logger.info("AggregateDeviceManager: 聚合设备创建成功 id=\(aggID)")
         
+        // 验证聚合设备是否包含我们的Tap
+        logger.info("🔍 AggregateDeviceManager: 验证聚合设备的TapList...")
+        var tapListAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioAggregateDevicePropertyTapList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        
+        var tapListSize: UInt32 = 0
+        let tapListSizeStatus = AudioObjectGetPropertyDataSize(aggID, &tapListAddress, 0, nil, &tapListSize)
+        if tapListSizeStatus == noErr && tapListSize > 0 {
+            logger.info("✅ AggregateDeviceManager: 聚合设备TapList大小: \(tapListSize) bytes")
+        } else {
+            logger.warning("⚠️ AggregateDeviceManager: 聚合设备TapList验证失败: \(tapListSizeStatus)")
+        }
+        
         // 尝试将系统输出设备切换到我们的聚合设备
         var defaultOutputProperty = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultOutputDevice,
@@ -83,6 +99,30 @@ class AggregateDeviceManager {
             logger.info("✅ AggregateDeviceManager: 系统输出设备已切换到聚合设备")
         } else {
             logger.warning("⚠️ AggregateDeviceManager: 切换系统输出设备失败: \(switchStatus)")
+        }
+        
+        // 尝试激活聚合设备中的Process Tap
+        logger.info("🔧 AggregateDeviceManager: 尝试激活聚合设备中的Process Tap")
+        var tapAutoStart: UInt32 = 1
+        var autoStartAddress = AudioObjectPropertyAddress(
+            mSelector: AudioUtils.kAudioAggregateDevicePropertyTapAutoStart,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        
+        let autoStartStatus = AudioObjectSetPropertyData(
+            aggID,
+            &autoStartAddress,
+            0,
+            nil,
+            UInt32(MemoryLayout<UInt32>.size),
+            &tapAutoStart
+        )
+        
+        if autoStartStatus == noErr {
+            logger.info("✅ AggregateDeviceManager: Process Tap自动启动已启用")
+        } else {
+            logger.warning("⚠️ AggregateDeviceManager: Process Tap自动启动设置失败: \(autoStartStatus)")
         }
         
         return true
@@ -195,6 +235,31 @@ class AggregateDeviceManager {
         }
         
         logger.info("AggregateDeviceManager: Block-based IO 回调已安装并启动")
+        
+        // 尝试强制激活聚合设备
+        logger.info("🔧 AggregateDeviceManager: 尝试强制激活聚合设备")
+        var deviceIsRunning: UInt32 = 1
+        var runningAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsRunning,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        
+        let runningStatus = AudioObjectSetPropertyData(
+            aggregateDeviceID,
+            &runningAddress,
+            0,
+            nil,
+            UInt32(MemoryLayout<UInt32>.size),
+            &deviceIsRunning
+        )
+        
+        if runningStatus == noErr {
+            logger.info("✅ AggregateDeviceManager: 聚合设备已强制激活")
+        } else {
+            logger.warning("⚠️ AggregateDeviceManager: 聚合设备强制激活失败: \(runningStatus)")
+        }
+        
         return true
     }
     

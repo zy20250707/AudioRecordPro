@@ -57,7 +57,8 @@ swiftc \
   "$STAGE_DIR/src/ProcessTapRecorder/AggregateDeviceManager.swift" \
   "$STAGE_DIR/src/ProcessTapRecorder/AudioToolboxFileManager.swift" \
   "$STAGE_DIR/src/ProcessTapRecorder/AudioCallbackHandler.swift" \
-  "$STAGE_DIR/src/ProcessTapRecorder/CoreAudioProcessTapRecorder.swift"
+  "$STAGE_DIR/src/ProcessTapRecorder/CoreAudioProcessTapRecorder.swift" \
+  "$STAGE_DIR/src/ProcessTapRecorder/SwiftProcessTapManager.swift"
 
 echo "[3/4] 拷贝 Info.plist 与资源..."
 plutil -convert binary1 "$ROOT_DIR/Info.plist" -o "$CONTENTS_DIR/Info.plist"

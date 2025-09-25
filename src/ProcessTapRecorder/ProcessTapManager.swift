@@ -43,21 +43,38 @@ class ProcessTapManager {
         // 检查是否为空列表（系统混音）
         if processObjectIDs.isEmpty {
             logger.info("🎯 ProcessTapManager: 创建系统混音Tap")
-            // 系统混音录制
-            let systemDesc = CATapDescription(stereoMixdownOfProcesses: [])
-            systemDesc.uuid = uuid
-            systemDesc.muteBehavior = .unmuted
             
-            logger.info("📝 系统混音Tap描述: UUID=\(uuid.uuidString), 静音行为=unmuted")
+            // 尝试使用 stereoGlobalTapButExcludeProcesses API（类似Audio Capture Pro）
+            logger.info("🔧 尝试使用 stereoGlobalTapButExcludeProcesses API（全局Tap，排除本进程）")
+            let globalDesc = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
+            globalDesc.uuid = uuid
+            globalDesc.muteBehavior = .unmuted
             
-            let systemStatus = createTap(systemDesc, &tapID)
-            if systemStatus != noErr || tapID == 0 {
-                logger.error("❌ ProcessTapManager: 系统混音Tap创建失败: OSStatus=\(systemStatus)")
-                return false
+            logger.info("📝 全局Tap描述: UUID=\(uuid.uuidString), 静音行为=unmuted")
+            
+            let globalStatus = createTap(globalDesc, &tapID)
+            if globalStatus == noErr && tapID != 0 {
+                logger.info("✅ 全局Tap创建成功（类似Audio Capture Pro的方案）")
+                self.processTapObjectID = tapID
             } else {
-                logger.info("✅ 系统混音Tap创建成功")
+                logger.warning("⚠️ 全局Tap创建失败: OSStatus=\(globalStatus)，回退到系统混音方案")
+                
+                // 回退到系统混音录制
+                let systemDesc = CATapDescription(stereoMixdownOfProcesses: [])
+                systemDesc.uuid = uuid
+                systemDesc.muteBehavior = .unmuted
+                
+                logger.info("📝 系统混音Tap描述: UUID=\(uuid.uuidString), 静音行为=unmuted")
+                
+                let systemStatus = createTap(systemDesc, &tapID)
+                if systemStatus != noErr || tapID == 0 {
+                    logger.error("❌ ProcessTapManager: 系统混音Tap创建失败: OSStatus=\(systemStatus)")
+                    return false
+                } else {
+                    logger.info("✅ 系统混音Tap创建成功")
+                }
+                self.processTapObjectID = tapID
             }
-            self.processTapObjectID = tapID
         } else {
             // 录制特定进程（支持多进程混音）
             logger.info("🎯 ProcessTapManager: 为进程列表创建Tap: \(processObjectIDs)")
@@ -172,6 +189,9 @@ class ProcessTapManager {
         } else {
             logger.warning("⚠️ ProcessTapManager: AudioDeviceStart启动失败: \(deviceStartStatus)")
         }
+        
+        // 延迟激活方案：先创建Tap，稍后在聚合设备中激活
+        logger.info("🔧 ProcessTapManager: Process Tap已创建，等待聚合设备激活")
         
         // 检查Process Tap的属性状态
         logger.info("🔍 ProcessTapManager: 检查Process Tap属性状态...")

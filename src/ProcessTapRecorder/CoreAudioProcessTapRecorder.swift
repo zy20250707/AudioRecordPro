@@ -19,6 +19,7 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
     private let processEnumerator = AudioProcessEnumerator()
     private var processTapManager: ProcessTapManager?
     private var aggregateDeviceManager: AggregateDeviceManager?
+    private var swiftProcessTapManager: SwiftProcessTapManager?  // 新增Swift API管理器
     private let audioCallbackHandler = AudioCallbackHandler()
     private var audioToolboxFileManager: AudioToolboxFileManager?
     
@@ -67,6 +68,86 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
         return nil
     }
     
+    /// 使用Swift CoreAudio API进行录制（实验性）
+    private func startRecordingWithSwiftAPI() -> Bool {
+        logger.info("🚀 开始使用Swift CoreAudio API进行录制")
+        
+        // 步骤1: 创建Process Tap
+        swiftProcessTapManager = SwiftProcessTapManager()
+        guard let tapManager = swiftProcessTapManager else {
+            logger.error("❌ 无法创建Swift Process Tap管理器")
+            return false
+        }
+        
+        // 解析目标进程对象ID
+        let processObjectIDs = resolveProcessObjectIDsSync()
+        logger.info("🎯 解析到的进程对象ID: \(processObjectIDs)")
+        
+        guard tapManager.createProcessTap(for: processObjectIDs) else {
+            logger.error("❌ Swift API: Process Tap创建失败")
+            return false
+        }
+        
+        // 步骤2: 创建聚合设备并绑定Tap
+        guard tapManager.createAggregateDeviceBindingTap() else {
+            logger.error("❌ Swift API: 聚合设备创建失败")
+            tapManager.stopAndDestroy()
+            return false
+        }
+        
+        // 步骤3: 设置音频文件
+        guard setupAudioFileWithSwiftAPI(tapManager: tapManager) else {
+            logger.error("❌ Swift API: 音频文件设置失败")
+            tapManager.stopAndDestroy()
+            return false
+        }
+        
+        // 步骤4: 设置IO回调并启动
+        let (callback, clientData) = audioCallbackHandler.createAudioCallback()
+        
+        guard tapManager.setupIOProcAndStart(callback: callback, clientData: clientData) else {
+            logger.error("❌ Swift API: IO回调设置失败")
+            tapManager.stopAndDestroy()
+            return false
+        }
+        
+        logger.info("✅ Swift API: 录制已成功启动")
+        return true
+    }
+    
+    /// 使用Swift API设置音频文件
+    private func setupAudioFileWithSwiftAPI(tapManager: SwiftProcessTapManager) -> Bool {
+        // 获取Tap的流格式
+        let streamFormat = AudioStreamBasicDescription(
+            mSampleRate: 44100.0,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved,
+            mBytesPerPacket: 4,
+            mFramesPerPacket: 1,
+            mBytesPerFrame: 4,
+            mChannelsPerFrame: 2,
+            mBitsPerChannel: 32,
+            mReserved: 0
+        )
+        
+        // 创建音频文件
+        let fileURL = FileManagerUtils.shared.getRecordingFileURL(recordingMode: recordingMode, appName: getTargetAppName(), format: "wav")
+        
+        audioToolboxFileManager = AudioToolboxFileManager(audioFormat: streamFormat)
+        do {
+            try audioToolboxFileManager?.createAudioFile(at: fileURL)
+        } catch {
+            logger.error("❌ AudioToolbox文件管理器初始化失败: \(error)")
+            return false
+        }
+        
+        // 设置回调处理器
+        audioCallbackHandler.setAudioToolboxFileManager(audioToolboxFileManager!)
+        
+        logger.info("✅ Swift API: 音频文件设置完成 - \(fileURL.lastPathComponent)")
+        return true
+    }
+
     // MARK: - Recording
     override func startRecording() {
         guard !isRunning else {
@@ -74,7 +155,22 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
             return
         }
         
-        // 对于CoreAudio Process Tap，我们需要先获取Tap格式，然后创建匹配的音频文件
+        logger.info("🚀 开始CoreAudio Process Tap录制")
+        
+        // 对于系统音频录制，优先尝试Swift API
+        if targetPIDs.isEmpty {
+            logger.info("🎯 系统音频录制，尝试Swift API")
+            if startRecordingWithSwiftAPI() {
+                logger.info("✅ 使用Swift API录制成功")
+                isRunning = true
+                return
+            }
+            logger.warning("⚠️ Swift API失败，回退到C API")
+        } else {
+            logger.info("🎯 指定进程录制，使用C API")
+        }
+        
+        // 回退到原来的C API实现
         startCoreAudioRecordingWithTapFormat()
     }
     
@@ -166,26 +262,55 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
             self?.callOnLevel(level)
         }
         
-        // 仅尝试 CoreAudio Process Tap（macOS 14.4+），放到后台线程避免阻塞主线程
+        // 对于系统音频录制，优先尝试Swift API，否则使用C API
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             Task { @MainActor in
-                let ok = await self.startCoreAudioProcessTapCapture()
-                if ok {
+                var success = false
+                var statusMessage = ""
+                
+                if self.targetPIDs.isEmpty {
+                    // 系统音频录制：尝试Swift API
+                    self.logger.info("🎯 系统音频录制，尝试Swift API")
+                    success = self.startRecordingWithSwiftAPI()
+                    if success {
+                        statusMessage = "已通过 Swift API 开始录制"
+                        self.logger.info("✅ 使用Swift API录制成功")
+                    } else {
+                        self.logger.warning("⚠️ Swift API失败，回退到C API")
+                        success = await self.startCoreAudioProcessTapCapture()
+                        statusMessage = success ? "已通过 C API 开始录制" : "CoreAudio Process Tap 初始化失败"
+                    }
+                } else {
+                    // 指定进程录制：使用C API
+                    self.logger.info("🎯 指定进程录制，使用C API")
+                    success = await self.startCoreAudioProcessTapCapture()
+                    statusMessage = success ? "已通过 C API 开始录制" : "CoreAudio Process Tap 初始化失败"
+                }
+                
+                if success {
                     self.levelMonitor.startMonitoring(source: .simulated)
                     self.isRunning = true
-                    self.callOnStatus("已通过 CoreAudio Process Tap 开始录制")
+                    self.callOnStatus(statusMessage)
                 } else {
-                    let msg = "CoreAudio Process Tap 初始化失败"
-                    self.logger.error(msg)
-                    self.callOnStatus(msg)
+                    self.logger.error("❌ \(statusMessage)")
+                    self.callOnStatus(statusMessage)
                 }
             }
         }
     }
     
     override func stopRecording() {
-        // 停止 CoreAudio 录制
+        logger.info("🛑 停止CoreAudio Process Tap录制")
+        
+        // 停止 Swift API 录制（如果正在使用）
+        if let swiftManager = swiftProcessTapManager {
+            logger.info("🛑 停止Swift API录制")
+            swiftManager.stopAndDestroy()
+            swiftProcessTapManager = nil
+        }
+        
+        // 停止 C API 录制（如果正在使用）
         stopCoreAudioProcessTapCapture()
         
         // 关闭 AudioToolbox 文件管理器
@@ -424,6 +549,22 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
         processTapManager = nil
         
         logger.info("CoreAudioProcessTapRecorder: 停止与清理完成")
+    }
+    
+    @available(macOS 14.4, *)
+    private func resolveProcessObjectIDsSync() -> [AudioObjectID] {
+        if targetPIDs.isEmpty {
+            // 系统混音录制，返回空数组
+            return []
+        }
+        
+        var objectIDs: [AudioObjectID] = []
+        for pid in targetPIDs {
+            if let objectID = processEnumerator.findProcessObjectID(by: pid) {
+                objectIDs.append(objectID)
+            }
+        }
+        return objectIDs
     }
     
     @available(macOS 14.4, *)
