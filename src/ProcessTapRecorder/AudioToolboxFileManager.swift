@@ -78,19 +78,28 @@ class AudioToolboxFileManager {
             return
         }
         
-        // 计算输入数据的实际声道数
+        // 检查是否需要格式转换
         let buffer = bufferList.mBuffers
-        let totalSamples = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
-        let inputChannels = totalSamples / Int(frameCount)
-        let outputChannels = Int(audioFormat.mChannelsPerFrame)
+        let isFloatFormat = (audioFormat.mFormatFlags & kAudioFormatFlagIsFloat) != 0
         
-        // 使用统一的工具类转换32位浮点数据为16位整数数据
-        let convertedData = try AudioUtils.convertFloat32ToInt16(
-            bufferList: bufferList,
-            frameCount: frameCount,
-            inputChannels: inputChannels,
-            outputChannels: outputChannels
-        )
+        let convertedData: Data
+        if isFloatFormat {
+            // 32-bit Float 格式，直接使用原始数据
+            let dataSize = Int(buffer.mDataByteSize)
+            convertedData = Data(bytes: buffer.mData!, count: dataSize)
+        } else {
+            // 非 Float 格式，需要转换
+            let totalSamples = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+            let inputChannels = totalSamples / Int(frameCount)
+            let outputChannels = Int(audioFormat.mChannelsPerFrame)
+            
+            convertedData = try AudioUtils.convertFloat32ToInt16(
+                bufferList: bufferList,
+                frameCount: frameCount,
+                inputChannels: inputChannels,
+                outputChannels: outputChannels
+            )
+        }
         
         // 准备写入数据
         var inNumPackets = frameCount
@@ -152,15 +161,12 @@ class AudioToolboxFileManager {
         wavFormat.mChannelsPerFrame = inputFormat.mChannelsPerFrame
         wavFormat.mFormatID = kAudioFormatLinearPCM
         
-        // 使用 16 位整数格式，确保最大兼容性
-        wavFormat.mBitsPerChannel = 16
-        wavFormat.mBytesPerFrame = wavFormat.mChannelsPerFrame * (wavFormat.mBitsPerChannel / 8)
-        wavFormat.mFramesPerPacket = 1
-        wavFormat.mBytesPerPacket = wavFormat.mBytesPerFrame * wavFormat.mFramesPerPacket
-        
-        // 格式标志：16位有符号整数，交错格式，打包格式，小端序
-        wavFormat.mFormatFlags = kAudioFormatFlagIsSignedInteger | 
-                                 kAudioFormatFlagIsPacked
+        // 保持输入格式的位深和格式标志，确保格式一致性
+        wavFormat.mBitsPerChannel = inputFormat.mBitsPerChannel
+        wavFormat.mBytesPerFrame = inputFormat.mBytesPerFrame
+        wavFormat.mFramesPerPacket = inputFormat.mFramesPerPacket
+        wavFormat.mBytesPerPacket = inputFormat.mBytesPerPacket
+        wavFormat.mFormatFlags = inputFormat.mFormatFlags
         
         logger.info("🎵 创建标准WAV格式:")
         logger.info("   采样率: \(wavFormat.mSampleRate)")
