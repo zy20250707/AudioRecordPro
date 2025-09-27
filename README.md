@@ -1,152 +1,232 @@
-# AudioRecordMac - macOS 音频录制工具
+# AudioRecordMac
 
-一个基于 Swift 和 AppKit 开发的 macOS 音频录制应用程序，支持「麦克风」与「系统声音」两种录制模式。
+一个功能强大的 macOS 音频录制应用程序，支持麦克风录制和系统音频录制两种模式，基于 Swift 和 AppKit 开发。
 
-## 应用界面截图
+## ✨ 主要功能
 
-![主界面](assets/screenshot-main.png)
+- 🎤 **麦克风录制** - 录制外部音频输入
+- 🔊 **系统音频录制** - 录制应用程序音频输出（支持指定进程）
+- 📊 **实时电平显示** - 专业的音频电平监控界面
+- 🎵 **多种音频格式** - 支持 WAV (PCM) 和 M4A (AAC) 格式
+- 🔧 **高质量音频** - 44.1kHz / 32-bit Float 高精度录制
+- 🎯 **进程选择** - 可录制特定应用程序的音频输出
 
-将截图文件保存为 `assets/screenshot-main.png`（相对项目根目录），README 将自动显示。
+## 🖼️ 应用界面
 
-## 核心系统 API
+![主界面](assets/main.png)
 
-### 1. 核心框架介绍
+## 🚀 快速开始
+
+### 系统要求
+- macOS 14.4+ (Process Tap 功能)
+- macOS 12.3+ (ScreenCaptureKit 功能)
+- 适当的系统权限（麦克风/屏幕录制）
+
+### 安装与运行
+```bash
+git clone <repository-url>
+cd audio_record_mac
+./build.sh
+open build/AudioRecordMac.app
+```
+
+## 📱 使用指南
+
+### 麦克风录制
+1. 选择"麦克风"模式
+2. 授予麦克风权限
+3. 点击"开始录制"按钮
+4. 实时查看电平显示
+
+### 系统音频录制
+1. 选择"系统音频"模式
+2. 授予屏幕录制权限
+3. 可选择特定应用程序进行录制
+4. 点击"开始录制"按钮
+
+## 🏗️ 技术架构
+
+### 核心框架
 
 #### AVFoundation
-- **作用**: 音频应用的基础框架，负责所有音频相关的系统操作
+- **用途**: 音频应用基础框架
 - **功能**: 音频录制、播放、格式转换、权限管理
-- **关键组件**: AVAudioEngine、AVAudioFile、AVAudioMixerNode
+- **关键组件**: `AVAudioEngine`、`AVAudioFile`、`AVAudioMixerNode`
+
+#### CoreAudio Process Tap (macOS 14.4+)
+- **用途**: 系统音频录制
+- **功能**: 捕获特定进程或系统混音音频
+- **关键组件**: `CATapDescription`、`AudioHardwareCreateProcessTap`
 
 #### Accelerate
-- **作用**: 性能优化的数学计算框架，专门用于实时音频分析
-- **功能**: 高性能数学运算、信号处理、音频电平计算
-- **关键组件**: vDSP 函数库，用于 RMS 计算和音频分析
+- **用途**: 高性能音频信号处理
+- **功能**: RMS 电平计算、实时音频分析
+- **关键组件**: vDSP 函数库
 
-### 2. 音频录制 API
+### 录制模式详解
 
-#### AVAudioEngine
-- 用途: 麦克风录制/播放链路核心
-- 主要组件:
-  - `AVAudioEngine.inputNode`: 麦克风输入节点
-  - `AVAudioMixerNode`: 混音节点（安装 tap 抓取 PCM）
-  - `AVAudioPlayerNode`: 播放节点（用于回放）
-
-#### AVAudioFile
-- 用途: 音频文件写入/读取
-- 支持格式: M4A(AAC), WAV(PCM)（当前不支持 MP3 实时编码）
-- 常用参数:
+#### 1. 麦克风录制 (AVAudioEngine)
 ```swift
-// M4A (AAC) 建议参数
-AVFormatIDKey: kAudioFormatMPEG4AAC
-AVSampleRateKey: 48000
-AVNumberOfChannelsKey: 2
-AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-
-// WAV (PCM) 建议参数
-AVFormatIDKey: kAudioFormatLinearPCM
-AVSampleRateKey: 48000
-AVNumberOfChannelsKey: 2
-AVLinearPCMBitDepthKey: 16
-AVLinearPCMIsFloatKey: false
-AVLinearPCMIsBigEndianKey: false
+// 核心架构
+inputNode -> recordMixer -> mainMixerNode
 ```
 
-#### ScreenCaptureKit (系统声音录制)
-- 用途: 录制系统输出音频（macOS 12.3+）
-- 主要组件:
-  - `SCStream`、`SCContentFilter`、`SCStreamConfiguration`、`SCStreamOutput`
+**关键参数:**
+- 采样率: 48kHz
+- 声道数: 2 (立体声)
+- 缓冲大小: 4096 帧
+- 格式: PCM Float32
 
-### 3. 播放与电平
-- 播放使用 `AVAudioEngine + AVAudioPlayerNode`；在 `mainMixerNode` 安装 tap 获取 `AVAudioPCMBuffer`，计算 RMS 电平并回调到 UI。
+**注意事项:**
+- 需要麦克风权限
+- 首次切换时主动请求权限
+- 使用 `format: nil` 避免格式不匹配
+
+#### 2. 系统音频录制 (CoreAudio Process Tap)
 ```swift
-playbackEngine.mainMixerNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { buffer, _ in
-    let level = calculateRMSLevel(from: buffer)
-    onLevel?(level)
-}
+// 录制流程
+Process Tap -> Aggregate Device -> Audio Callback -> File
 ```
 
-### 4. 电平计算（RMS）
+**关键参数:**
+- 采样率: 44.1kHz (CD 标准)
+- 位深: 32-bit Float (高精度)
+- 声道数: 2 (立体声)
+- 格式: Linear PCM Float
+
+**支持功能:**
+- 单进程录制
+- 多进程混音录制
+- 系统全局混音录制
+
+### 音频格式配置
+
+#### WAV (PCM) 格式
 ```swift
-let rms = sqrt(sum(sample*sample) / frameCount)
-let level = min(1.0, rms * 20.0)
+AudioStreamBasicDescription(
+    mSampleRate: 44100.0,
+    mFormatID: kAudioFormatLinearPCM,
+    mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+    mBitsPerChannel: 32,
+    mChannelsPerFrame: 2
+)
 ```
 
-## 两种录制模式（关键代码 / 参数 / 注意事项）
-
-### A. 麦克风录制（AVAudioEngine）
-- 关键代码：`MicrophoneRecorder`
-  - 构图：`inputNode -> recordMixer -> mainMixerNode`
-  - 顺序：配置 -> 启动引擎 -> 安装 tap（避免未启动 tap 无数据）
-  - 写入：`AVAudioFile`（默认 M4A/AAC，48kHz，立体声）
-  - Tap：`recordMixer.installTap(onBus: 0, bufferSize: 4096, format: nil)`（用节点当前格式，降低格式不匹配风险）
-- 关键参数：
-  - 采样率 `48000`、声道 `2`、缓冲 `4096` 帧、`pcmFormatFloat32`
-  - `engine.mainMixerNode.outputVolume = 0` 避免监控时本地回放
-- 注意事项：
-  - 需要麦克风权限；首次在“切换到麦克风模式”时请求
-  - 文件与缓冲格式不一致会导致静音；采用 `format: nil` 让系统匹配
-
-### B. 系统声音录制（ScreenCaptureKit）
-- 关键代码：`SystemAudioRecorder`
-  - 获取内容：`SCShareableContent.excludingDesktopWindows(_, onScreenWindowsOnly: true)`
-  - 过滤器：`SCContentFilter(display: display, excludingApplications: [本应用])`
-  - 配置：
+#### M4A (AAC) 格式
 ```swift
-let config = SCStreamConfiguration()
-config.capturesAudio = true
-config.excludesCurrentProcessAudio = true // 包含本应用声音设为 false
-config.sampleRate = 48000
-config.channelCount = 2
-// 视频最小分辨率以驱动音频时钟
-config.width = 320; config.height = 240
-config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
-config.queueDepth = 5
+[
+    AVFormatIDKey: kAudioFormatMPEG4AAC,
+    AVSampleRateKey: 48000,
+    AVNumberOfChannelsKey: 2,
+    AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+]
 ```
-  - 输出：同时添加 `.audio` 与 `.screen` 输出（视频最小处理）
-  - 写入：将 `CMSampleBuffer` 拷贝到 `AVAudioPCMBuffer` 再写入 `AVAudioFile`
-- 注意事项：
-  - 需要“屏幕录制”权限；macOS 12.3+ 才支持 ScreenCaptureKit
-  - 添加屏幕输出以驱动音频；`excludesCurrentProcessAudio` 控制是否录到本应用声音
-  - DRM/受保护内容可能被系统静音
 
-## 播放控制
-- 支持随时“停止播放”；播放状态下按钮文案变更为“停止播放”。
-- 电平为播放样式（蓝色）并提高灵敏度，视觉更动态。
+## 🔧 核心类结构
 
-## 权限要求与时机
-- 麦克风权限：在“切换到麦克风模式”时主动请求；录制时仅静默检查并引导。
-- 屏幕录制权限：在“切换到系统音频模式”时主动请求；录制前进行异步静默检查并引导设置。
+### 主要组件
+- `AppDelegate` - 应用程序生命周期管理
+- `MainViewController` - 主视图控制器
+- `AudioRecorderController` - 音频录制控制器（工厂模式）
+- `CoreAudioProcessTapRecorder` - 系统音频录制器
+- `MicrophoneRecorder` - 麦克风录制器
+- `LevelMeterView` - 专业电平表视图
+- `ProcessTapManager` - Process Tap 管理器
+- `AudioToolboxFileManager` - 音频文件管理器
 
-## 文件输出
-- 默认保存位置：`~/Documents/AudioRecordings/`
-- 文件命名：`录音_YYYY-MM-DD_HH-mm-ss.m4a`（或 `.wav`）
+### 工具类
+- `AudioUtils` - 音频工具类（格式转换、电平计算）
+- `FileManagerUtils` - 文件管理工具
+- `Logger` - 统一日志记录器
+- `PermissionManager` - 权限管理
 
-## 主要类结构
-- `AppDelegate`: 应用程序生命周期管理
-- `MainViewController`: 主视图控制器
-- `AudioRecorderController`: 音频录制控制器（工厂，切换模式）
-- `MainWindowView`: 主窗口视图
-- `LevelMeterView`: 电平表视图（录制=红色，播放=蓝色）
-- `LevelMonitor`: 电平监控器
-- `AudioUtils`: 音频工具类
-- `FileManagerUtils`: 文件管理工具
-- `Logger`: 日志记录器
+## 📊 电平监控
 
-## 设计模式
-- 委托模式：视图与控制器通信
-- 观察者模式：状态变化通知
-- 单例模式：工具类实例管理
+### 实时电平计算
+```swift
+// RMS 电平计算
+let rms = sqrt(sum(sample * sample) / frameCount)
+let normalizedLevel = min(1.0, rms * sensitivityMultiplier)
+```
 
-## 可选参数与可扩展功能
-- ScreenCaptureKit：
-  - `excludesCurrentProcessAudio` 切换是否录到本应用声音
-  - `captureMicrophone = true`（**仅用于屏幕录制时叠加麦克风解说**，不适合纯麦克风录制）
-  - `width/height/minimumFrameInterval/queueDepth` 影响性能与延迟
-  - macOS 15+ 可用 `SCRecordingOutput` 直接封装为 MP4（参考 Apple Sample）
-- AVAudioEngine：
-  - 在 `recordMixer` 上做音量、EQ、压缩、混响等实时处理
-  - 同时录制系统声音与麦克风：混合到同一文件或分别落盘
-- 文件格式：
-  - M4A（AAC）硬件加速、体积小；WAV（PCM）无损、适合后期处理
-- 后期处理：
-  - 响度归一、降噪、压缩；或导出 WAV 后离线转码为 MP3（LAME/FFmpeg）
+### 电平表特性
+- **录制模式**: 红色渐变，实时响应
+- **播放模式**: 蓝色渐变，高灵敏度
+- **专业显示**: 支持峰值保持、噪声门控制
+- **锯齿效果**: 模拟专业音频设备的视觉效果
+
+## 📁 文件管理
+
+### 默认保存位置
+```
+~/Documents/AudioRecordings/
+```
+
+### 文件命名规则
+- 麦克风录制: `microphone_YYYY-MM-DD_HH-mm-ss.wav`
+- 系统音频: `system_AppName_YYYY-MM-DD_HH-mm-ss.wav`
+
+### 支持的格式
+- **WAV (PCM)**: 无损质量，适合后期处理
+- **M4A (AAC)**: 硬件加速，文件体积小
+
+## 🔐 权限管理
+
+### 麦克风权限
+- 首次切换到麦克风模式时请求
+- 录制前进行静默检查
+
+### 屏幕录制权限
+- 首次切换到系统音频模式时请求
+- 录制前进行异步检查并引导设置
+
+## 🎛️ 高级功能
+
+### 进程选择
+- 自动检测运行中的音频应用程序
+- 支持指定单个或多个进程录制
+- 实时进程列表更新
+
+### 音频处理
+- 实时电平监控
+- 格式自动适配
+- 高质量音频保持
+
+### 扩展性
+- 模块化设计，易于添加新功能
+- 支持自定义音频处理链
+- 可扩展的格式支持
+
+## 🐛 故障排除
+
+### 常见问题
+
+**Q: 录制没有声音？**
+A: 检查权限设置，确保已授予麦克风或屏幕录制权限。
+
+**Q: 系统音频录制失败？**
+A: 确保系统版本为 macOS 14.4+，并检查目标应用程序是否正在播放音频。
+
+**Q: 音频文件音调异常？**
+A: 应用使用 44.1kHz 采样率，确保播放器支持该采样率。
+
+### 调试信息
+应用提供详细的日志输出，可通过控制台查看录制过程的详细信息。
+
+## 📄 许可证
+
+本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。
+
+## 🤝 贡献
+
+欢迎提交 Issue 和 Pull Request 来改进这个项目。
+
+## 📞 联系方式
+
+如有问题或建议，请通过以下方式联系：
+- 提交 GitHub Issue
+- 发送邮件至 [your-email@example.com]
+
+---
+
+**注意**: 本应用需要适当的系统权限才能正常工作。请在使用前仔细阅读权限说明。
