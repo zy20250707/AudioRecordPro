@@ -68,6 +68,13 @@ class AudioProcessEnumerator {
                 continue 
             }
             
+            // 排除当前应用自己
+            let currentPID = ProcessInfo.processInfo.processIdentifier
+            if pid == currentPID {
+                logger.debug("🚫 跳过当前应用: PID=\(pid)")
+                continue
+            }
+            
             let (name, path) = readNameAndPath(for: pid)
             
             // 跳过被过滤的进程
@@ -286,7 +293,7 @@ class AudioProcessEnumerator {
             return false
         }
 
-        // 常见关键字过滤（但排除主进程、Chrome 音频服务进程和微信扩展进程）
+        // 常见关键字过滤（但排除主进程和 Chrome 音频服务进程）
         let keywords = [" helper", "renderer", "gpu", "webhelper", "plugin", "(renderer)"]
         if keywords.contains(where: { n.contains($0) }) { 
             // 特殊处理：如果是 Chrome 音频服务进程，不过滤
@@ -294,34 +301,23 @@ class AudioProcessEnumerator {
                 logger.debug("✅ 关键字过滤中保留 Chrome 音频服务进程: name=\(name), path=\(path)")
                 return false
             }
-            // 特殊处理：如果是微信扩展进程，不过滤
-            if n.contains("wechatappex") {
-                logger.debug("✅ 关键字过滤中保留微信扩展进程: name=\(name), path=\(path)")
-                return false
-            }
+            // WeChatAppEx Helper/Plugin 等辅助进程应该被过滤
+            logger.debug("🧹 过滤辅助进程: name=\(name)")
             return true 
         }
         if keywords.contains(where: { b.contains($0) }) { 
-            // 特殊处理：如果是微信扩展进程，不过滤
-            if b.contains("com.tencent.xinwechat") {
-                logger.debug("✅ Bundle ID 过滤中保留微信扩展进程: bundle=\(bundleID), path=\(path)")
-                return false
-            }
+            logger.debug("🧹 过滤辅助进程(Bundle): bundle=\(bundleID)")
             return true 
         }
 
-        // 路径特征：在 Helpers 目录下或以 Helper.app 结尾（但排除 Chrome 音频服务进程和微信扩展进程）
+        // 路径特征：在 Helpers 目录下或以 Helper.app 结尾（但排除 Chrome 音频服务进程）
         if p.contains("/helpers/") || p.hasSuffix("helper.app") { 
             // 特殊处理：如果是 Chrome 音频服务进程，不过滤
             if n.contains("google chrome helper") && p.contains("audio.mojom.AudioService") {
                 logger.debug("✅ 路径过滤中保留 Chrome 音频服务进程: name=\(name), path=\(path)")
                 return false
             }
-            // 特殊处理：如果是微信扩展进程，不过滤
-            if n.contains("wechatappex") {
-                logger.debug("✅ 路径过滤中保留微信扩展进程: name=\(name), path=\(path)")
-                return false
-            }
+            logger.debug("🧹 过滤 Helper 路径进程: path=\(path)")
             return true 
         }
 
@@ -344,14 +340,9 @@ class AudioProcessEnumerator {
     
     /// 判断是否为 Dock 应用
     private func isDockApp(pid: pid_t, path: String) -> Bool {
-        // 特殊处理：Chrome Helper 进程和微信扩展进程总是允许
-        if path.contains("Google Chrome Helper.app") {
-            logger.debug("✅ isDockApp: 允许 Chrome Helper 进程: path=\(path)")
-            return true
-        }
-        
-        if path.contains("WeChatAppEx.app") {
-            logger.debug("✅ isDockApp: 允许微信扩展进程: path=\(path)")
+        // 特殊处理：Chrome Helper 音频服务进程总是允许
+        if path.contains("Google Chrome Helper.app") && path.contains("audio.mojom.AudioService") {
+            logger.debug("✅ isDockApp: 允许 Chrome 音频服务进程: path=\(path)")
             return true
         }
         
