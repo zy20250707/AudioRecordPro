@@ -143,8 +143,9 @@ class SwiftProcessTapManager {
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain
             )
-            var tapList: CFArray = [tapUID] as CFArray
-            let setStatus = AudioObjectSetPropertyData(aggregateDeviceID, &tapListPropertyAddress, 0, nil, UInt32(MemoryLayout<CFArray>.size), &tapList)
+            let tapList: CFArray = [tapUID] as CFArray
+            var tapListRef = Unmanaged.passUnretained(tapList).toOpaque()
+            let setStatus = AudioObjectSetPropertyData(aggregateDeviceID, &tapListPropertyAddress, 0, nil, UInt32(MemoryLayout<UnsafeRawPointer>.size), &tapListRef)
             guard setStatus == noErr else {
                 logger.error("❌ SwiftProcessTapManager: 设置TapList失败: OSStatus=\(setStatus)")
                 cleanup()
