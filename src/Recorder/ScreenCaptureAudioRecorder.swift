@@ -3,9 +3,9 @@ import AVFoundation
 import CoreMedia
 import ScreenCaptureKit
 
-/// 系统音频录制器
+/// 系统音频录制器 (基于 ScreenCaptureKit)
 @MainActor
-class SystemAudioRecorder: BaseAudioRecorder {
+class ScreenCaptureAudioRecorder: BaseAudioRecorder {
     
     // MARK: - Properties
     private var screenCaptureStream: SCStream?
@@ -306,7 +306,7 @@ class SystemAudioRecorder: BaseAudioRecorder {
 }
 
 // MARK: - SCStreamDelegate
-extension SystemAudioRecorder: SCStreamDelegate {
+extension ScreenCaptureAudioRecorder: SCStreamDelegate {
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
         Task { @MainActor in
             self.logger.error("SCStream停止，错误: \(error.localizedDescription)")

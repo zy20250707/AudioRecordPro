@@ -1,6 +1,6 @@
 import Foundation
 
-// （移除内嵌 MicrophoneRecorder，统一使用独立文件 src/Controllers/MicrophoneRecorder.swift）
+// （移除内嵌 MicrophoneRecorder，统一使用独立文件 src/Recorder/MicrophoneRecorder.swift）
 
 // MARK: - Factory Controller
 
@@ -143,7 +143,7 @@ class AudioRecorderController: NSObject {
                 newRecorder = coreRecorder
             } else {
                 logger.warning("CoreAudio Process Tap 需要 macOS 14.4+，回退到系统音频录制器")
-                newRecorder = SystemAudioRecorder(mode: .systemMixdown)
+                newRecorder = ScreenCaptureAudioRecorder(mode: .systemMixdown)
             }
         }
         

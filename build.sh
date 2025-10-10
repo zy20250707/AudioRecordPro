@@ -46,9 +46,9 @@ swiftc \
   "$STAGE_DIR/src/Views/TabContainerView.swift" \
   "$STAGE_DIR/src/Views/RecordedFilesView.swift" \
   "$STAGE_DIR/src/Views/WaveformView.swift" \
-  "$STAGE_DIR/src/Controllers/AudioRecorderProtocol.swift" \
-  "$STAGE_DIR/src/Controllers/MicrophoneRecorder.swift" \
-  "$STAGE_DIR/src/Controllers/SystemAudioRecorder.swift" \
+  "$STAGE_DIR/src/Recorder/AudioRecorderProtocol.swift" \
+  "$STAGE_DIR/src/Recorder/MicrophoneRecorder.swift" \
+  "$STAGE_DIR/src/Recorder/ScreenCaptureAudioRecorder.swift" \
   "$STAGE_DIR/src/Controllers/AudioRecorderController.swift" \
   "$STAGE_DIR/src/Controllers/MainViewController.swift" \
   "$STAGE_DIR/src/Controllers/AppDelegate.swift" \
