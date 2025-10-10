@@ -180,9 +180,10 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
             audioFormat = tapFormat
             logger.info("📊 使用Tap格式: 采样率=\(tapFormat.mSampleRate), 声道数=\(tapFormat.mChannelsPerFrame), 位深=\(tapFormat.mBitsPerChannel)")
         } else {
-            // 使用默认格式（与Process Tap匹配的标准格式）
+            // 使用动态检测的音频格式（匹配当前音频设备）
+            let detectedSampleRate = AudioUtils.getCurrentAudioDeviceSampleRate()
             audioFormat = AudioStreamBasicDescription(
-                mSampleRate: 44100.0,        // ← 44.1kHz标准采样率
+                mSampleRate: detectedSampleRate,        // ← 动态检测的采样率
                 mFormatID: kAudioFormatLinearPCM,
                 mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
                 mBytesPerPacket: 8,
@@ -192,7 +193,7 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
                 mBitsPerChannel: 32,         // ← 32位浮点格式
                 mReserved: 0
             )
-            logger.info("📊 使用默认格式: 44.1kHz, 32bit Float, 立体声")
+            logger.info("📊 使用动态检测格式: \(detectedSampleRate)Hz, 32bit Float, 立体声")
         }
         
         // 获取应用名称

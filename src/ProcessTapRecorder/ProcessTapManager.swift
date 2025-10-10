@@ -158,9 +158,10 @@ class ProcessTapManager {
             logger.warning("   错误代码: OSStatus=\(status)")
             logger.warning("   Tap ID: \(processTapObjectID)")
             
-            // 使用默认的音频格式（与Process Tap匹配的标准格式）
+            // 使用动态检测的音频格式（匹配当前音频设备）
+            let detectedSampleRate = AudioUtils.getCurrentAudioDeviceSampleRate()
             asbd = AudioStreamBasicDescription(
-                mSampleRate: 44100.0,        // ← 44.1kHz标准采样率
+                mSampleRate: detectedSampleRate,        // ← 动态检测的采样率
                 mFormatID: kAudioFormatLinearPCM,
                 mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
                 mBytesPerPacket: 8,
@@ -170,7 +171,7 @@ class ProcessTapManager {
                 mBitsPerChannel: 32,         // ← 32位浮点格式
                 mReserved: 0
             )
-            logger.info("📊 使用默认音频格式: 44.1kHz, 32bit Float, 立体声")
+            logger.info("📊 使用动态检测音频格式: \(detectedSampleRate)Hz, 32bit Float, 立体声")
         }
         
         self.streamFormatASBD = asbd

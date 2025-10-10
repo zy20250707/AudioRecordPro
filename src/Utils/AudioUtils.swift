@@ -12,6 +12,57 @@ class AudioUtils {
     
     private init() {}
     
+    /// 获取当前系统默认音频输出设备的采样率
+    static func getCurrentAudioDeviceSampleRate() -> Double {
+        var defaultOutputProperty = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        
+        var outputDeviceID: AudioDeviceID = 0
+        var propertySize = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let getStatus = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &defaultOutputProperty,
+            0,
+            nil,
+            &propertySize,
+            &outputDeviceID
+        )
+        
+        guard getStatus == noErr else {
+            Logger.shared.warning("无法获取默认输出设备，使用默认采样率 44100")
+            return 44100.0
+        }
+        
+        // 获取设备的流格式
+        var streamFormatProperty = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamFormat,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        
+        var asbd = AudioStreamBasicDescription()
+        var streamFormatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let streamFormatStatus = AudioObjectGetPropertyData(
+            outputDeviceID,
+            &streamFormatProperty,
+            0,
+            nil,
+            &streamFormatSize,
+            &asbd
+        )
+        
+        if streamFormatStatus == noErr && asbd.mSampleRate > 0 {
+            Logger.shared.info("检测到当前音频设备采样率: \(asbd.mSampleRate) Hz")
+            return asbd.mSampleRate
+        } else {
+            Logger.shared.warning("无法获取音频设备采样率，使用默认采样率 44100")
+            return 44100.0
+        }
+    }
+    
     /// 音频格式枚举
     enum AudioFormat: String, CaseIterable {
         case m4a = "M4A"

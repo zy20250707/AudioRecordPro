@@ -263,16 +263,77 @@ class AudioProcessEnumerator {
         let b = bundleID.lowercased()
         let p = path.lowercased()
 
-        // 常见关键字
+        // 保留 Chrome 主进程和音频服务进程，但过滤其他 Helper 进程
+        if n == "google chrome" || b == "com.google.chrome" {
+            logger.debug("✅ 保留 Chrome 主进程: name=\(name), bundle=\(bundleID)")
+            return false  // 不过滤 Chrome 主进程
+        }
+        
+        // 保留 Chrome 音频服务进程（这是实际处理音频的进程）
+        if n.contains("google chrome helper") && p.contains("audio.mojom.AudioService") {
+            logger.debug("✅ 保留 Chrome 音频服务进程: name=\(name), bundle=\(bundleID), path=\(path)")
+            return false  // 不过滤 Chrome 音频服务进程
+        }
+        
+        // 保留其他浏览器主进程
+        if n == "safari" || b == "com.apple.safari" {
+            logger.debug("✅ 保留 Safari 主进程: name=\(name), bundle=\(bundleID)")
+            return false
+        }
+        
+        if n == "firefox" || b.contains("org.mozilla.firefox") {
+            logger.debug("✅ 保留 Firefox 主进程: name=\(name), bundle=\(bundleID)")
+            return false
+        }
+
+        // 常见关键字过滤（但排除主进程、Chrome 音频服务进程和微信扩展进程）
         let keywords = [" helper", "renderer", "gpu", "webhelper", "plugin", "(renderer)"]
-        if keywords.contains(where: { n.contains($0) }) { return true }
-        if keywords.contains(where: { b.contains($0) }) { return true }
+        if keywords.contains(where: { n.contains($0) }) { 
+            // 特殊处理：如果是 Chrome 音频服务进程，不过滤
+            if n.contains("google chrome helper") && p.contains("audio.mojom.AudioService") {
+                logger.debug("✅ 关键字过滤中保留 Chrome 音频服务进程: name=\(name), path=\(path)")
+                return false
+            }
+            // 特殊处理：如果是微信扩展进程，不过滤
+            if n.contains("wechatappex") {
+                logger.debug("✅ 关键字过滤中保留微信扩展进程: name=\(name), path=\(path)")
+                return false
+            }
+            return true 
+        }
+        if keywords.contains(where: { b.contains($0) }) { 
+            // 特殊处理：如果是微信扩展进程，不过滤
+            if b.contains("com.tencent.xinwechat") {
+                logger.debug("✅ Bundle ID 过滤中保留微信扩展进程: bundle=\(bundleID), path=\(path)")
+                return false
+            }
+            return true 
+        }
 
-        // 路径特征：在 Helpers 目录下或以 Helper.app 结尾
-        if p.contains("/helpers/") || p.hasSuffix("helper.app") { return true }
+        // 路径特征：在 Helpers 目录下或以 Helper.app 结尾（但排除 Chrome 音频服务进程和微信扩展进程）
+        if p.contains("/helpers/") || p.hasSuffix("helper.app") { 
+            // 特殊处理：如果是 Chrome 音频服务进程，不过滤
+            if n.contains("google chrome helper") && p.contains("audio.mojom.AudioService") {
+                logger.debug("✅ 路径过滤中保留 Chrome 音频服务进程: name=\(name), path=\(path)")
+                return false
+            }
+            // 特殊处理：如果是微信扩展进程，不过滤
+            if n.contains("wechatappex") {
+                logger.debug("✅ 路径过滤中保留微信扩展进程: name=\(name), path=\(path)")
+                return false
+            }
+            return true 
+        }
 
-        // 具体特例：Google Chrome Helper 系列
-        if n.contains("google chrome helper") || b.contains("com.google.chrome.helper") { return true }
+        // 具体特例：Google Chrome Helper 系列（但排除音频服务进程）
+        if n.contains("google chrome helper") || b.contains("com.google.chrome.helper") { 
+            // 如果已经是音频服务进程，不应该到这里，但为了安全起见再检查一次
+            if p.contains("audio.mojom.AudioService") {
+                logger.debug("✅ 再次确认保留 Chrome 音频服务进程: name=\(name), path=\(path)")
+                return false
+            }
+            return true 
+        }
 
         // WebKit/GPU 相关（已基本被系统路径过滤，但再兜底一次）
         if n.contains("webkit") && (n.contains("gpu") || n.contains("network") || n.contains("webcontent")) {
@@ -283,6 +344,17 @@ class AudioProcessEnumerator {
     
     /// 判断是否为 Dock 应用
     private func isDockApp(pid: pid_t, path: String) -> Bool {
+        // 特殊处理：Chrome Helper 进程和微信扩展进程总是允许
+        if path.contains("Google Chrome Helper.app") {
+            logger.debug("✅ isDockApp: 允许 Chrome Helper 进程: path=\(path)")
+            return true
+        }
+        
+        if path.contains("WeChatAppEx.app") {
+            logger.debug("✅ isDockApp: 允许微信扩展进程: path=\(path)")
+            return true
+        }
+        
         if let running = NSRunningApplication(processIdentifier: pid) {
             return running.activationPolicy == .regular
         }
