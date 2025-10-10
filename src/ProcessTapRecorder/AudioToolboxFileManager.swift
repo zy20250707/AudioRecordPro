@@ -127,8 +127,9 @@ class AudioToolboxFileManager {
         
         totalFramesWritten += UInt64(inNumPackets)
         
-        if totalFramesWritten % 1000 == 0 {  // 每1000帧记录一次
-            logger.debug("📝 AudioToolboxFileManager: 已写入 \(totalFramesWritten) 帧")
+        // 每50000帧记录一次（约1秒@48kHz），减少日志输出
+        if totalFramesWritten % 50000 == 0 {
+            logger.info("📝 AudioToolboxFileManager: 已写入 \(totalFramesWritten) 帧")
         }
     }
     

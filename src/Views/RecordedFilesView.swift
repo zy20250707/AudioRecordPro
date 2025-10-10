@@ -304,17 +304,17 @@ class FileInfoView: NSView {
             nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             nameLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             
-            // 日期
-            dateLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
-            dateLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2),
+            // 时长（从左边开始）
+            durationLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
+            durationLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2),
             
-            // 时长
-            durationLabel.leadingAnchor.constraint(equalTo: dateLabel.trailingAnchor, constant: 12),
-            durationLabel.centerYAnchor.constraint(equalTo: dateLabel.centerYAnchor),
+            // 大小（紧跟时长后面）
+            sizeLabel.leadingAnchor.constraint(equalTo: durationLabel.trailingAnchor, constant: 16),
+            sizeLabel.centerYAnchor.constraint(equalTo: durationLabel.centerYAnchor),
             
-            // 大小
-            sizeLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            sizeLabel.centerYAnchor.constraint(equalTo: dateLabel.centerYAnchor),
+            // 日期（隐藏，不显示）
+            dateLabel.widthAnchor.constraint(equalToConstant: 0),
+            dateLabel.heightAnchor.constraint(equalToConstant: 0),
             
             // 高度
             heightAnchor.constraint(equalToConstant: 60)
@@ -332,8 +332,9 @@ class FileInfoView: NSView {
     
     func configure(with file: RecordedFileInfo) {
         nameLabel.stringValue = file.name
-        dateLabel.stringValue = file.formattedDate
+        // 第二排只显示时长和大小，不显示日期
+        dateLabel.stringValue = ""
         durationLabel.stringValue = "时长: \(file.formattedDuration)"
-        sizeLabel.stringValue = file.formattedSize
+        sizeLabel.stringValue = "大小: \(file.formattedSize)"
     }
 }

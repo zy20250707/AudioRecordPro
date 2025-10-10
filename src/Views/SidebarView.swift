@@ -25,6 +25,7 @@ class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate, TabContai
     private let appsHeader = NSTextField()
     private let systemCheckbox = NSButton(checkboxWithTitle: "系统音频输出", target: nil, action: nil)
     private let microphoneCheckbox = NSButton(checkboxWithTitle: "麦克风", target: nil, action: nil)
+    private let mixAudioCheckbox = NSButton(checkboxWithTitle: "实时混音（开发中）", target: nil, action: nil)
     private let refreshButton = NSButton(title: "🔄 刷新", target: nil, action: nil)
     private let appsScroll = NSScrollView()
     private let appsTable = NSTableView()
@@ -83,6 +84,7 @@ class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate, TabContai
         audioRecorderTabView.addSubview(appsHeader)
         audioRecorderTabView.addSubview(systemCheckbox)
         audioRecorderTabView.addSubview(microphoneCheckbox)
+        audioRecorderTabView.addSubview(mixAudioCheckbox)
         audioRecorderTabView.addSubview(refreshButton)
         audioRecorderTabView.addSubview(appsScroll)
         
@@ -142,12 +144,17 @@ class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate, TabContai
         systemCheckbox.target = self
         systemCheckbox.action = #selector(sourceCheckboxChanged)
         systemCheckbox.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(systemCheckbox)
         
         microphoneCheckbox.target = self
         microphoneCheckbox.action = #selector(sourceCheckboxChanged)
         microphoneCheckbox.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(microphoneCheckbox)
+        
+        // 混音开关（预留，暂时禁用）
+        mixAudioCheckbox.target = self
+        mixAudioCheckbox.action = #selector(mixAudioCheckboxChanged)
+        mixAudioCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        mixAudioCheckbox.isEnabled = false  // 暂时禁用，功能开发中
+        mixAudioCheckbox.toolTip = "实时混音功能开发中，敬请期待"
     }
     
     private func setupRefreshButton() {
@@ -200,7 +207,10 @@ class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate, TabContai
             microphoneCheckbox.topAnchor.constraint(equalTo: micHeader.bottomAnchor, constant: 8),
             microphoneCheckbox.leadingAnchor.constraint(equalTo: audioRecorderTabView.leadingAnchor, constant: 16),
             
-            appsHeader.topAnchor.constraint(equalTo: microphoneCheckbox.bottomAnchor, constant: 18),
+            mixAudioCheckbox.topAnchor.constraint(equalTo: microphoneCheckbox.bottomAnchor, constant: 8),
+            mixAudioCheckbox.leadingAnchor.constraint(equalTo: audioRecorderTabView.leadingAnchor, constant: 16),
+            
+            appsHeader.topAnchor.constraint(equalTo: mixAudioCheckbox.bottomAnchor, constant: 18),
             appsHeader.leadingAnchor.constraint(equalTo: audioRecorderTabView.leadingAnchor, constant: 16),
             
             refreshButton.topAnchor.constraint(equalTo: appsHeader.bottomAnchor, constant: 8),
@@ -218,6 +228,11 @@ class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate, TabContai
     // MARK: - Actions
     @objc private func sourceCheckboxChanged() {
         delegate?.sidebarViewDidChangeSourceSelection(self)
+    }
+    
+    @objc private func mixAudioCheckboxChanged() {
+        // 预留：混音功能开发中
+        logger.info("混音开关状态: \(mixAudioCheckbox.state == .on ? "开启" : "关闭")")
     }
     
     @objc private func refreshButtonClicked() {

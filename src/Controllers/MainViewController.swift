@@ -257,7 +257,6 @@ class MainViewController: NSViewController {
         }
         // 确保音频控制器已初始化
         ensureAudioControllerInitialized()
-        logger.info("开始录制，模式: \(currentRecordingMode.rawValue)")
         
         // 根据左侧选择动态确定录制源
         let wantMic = mainWindowView.isMicrophoneSourceSelected()
@@ -270,21 +269,14 @@ class MainViewController: NSViewController {
             return
         }
         
-        // 确定录制模式
-        if wantMic {
-            currentRecordingMode = .microphone
-            audioRecorderController?.setRecordingMode(.microphone)
-            mainWindowView.updateStatus("麦克风准备中…")
-        } else if wantSpecificProcess {
-            currentRecordingMode = .specificProcess
-            audioRecorderController?.setRecordingMode(.specificProcess)
-            audioRecorderController?.setCoreAudioTargetPID(selectedPIDs.first)
-            mainWindowView.updateStatus("特定进程录制准备中…")
-        } else if wantSystemMixdown {
-            currentRecordingMode = .systemMixdown
-            audioRecorderController?.setRecordingMode(.systemMixdown)
-            mainWindowView.updateStatus("系统混音准备中…")
-        }
+        logger.info("开始多音源录制 - 麦克风:\(wantMic), 系统:\(wantSystemMixdown), 进程:\(wantSpecificProcess)")
+        
+        // 构建录制源描述
+        var sources: [String] = []
+        if wantMic { sources.append("麦克风") }
+        if wantSystemMixdown { sources.append("系统音频") }
+        if wantSpecificProcess { sources.append("特定进程") }
+        let sourcesText = sources.joined(separator: " + ")
         
         checkPermissionsBeforeRecording { [weak self] granted in
             guard let self = self else { return }
@@ -293,22 +285,30 @@ class MainViewController: NSViewController {
                 self.handleRecordingFailure()
                 return
             }
+            
             // 录制前主动请求系统音频捕获权限（TCC）
-            if self.currentRecordingMode == .specificProcess || self.currentRecordingMode == .systemMixdown {
+            if wantSystemMixdown || wantSpecificProcess {
                 PermissionManager.shared.requestSystemAudioCapturePermission { status in
                     // 无论结果如何，继续尝试启动，系统也会再次弹窗
                 }
             }
+            
             self.isRecording = true
             self.recordingStartTime = Date()
             self.mainWindowView.updateRecordingState(.preparing)
-            self.mainWindowView.updateStatus("准备录制…")
+            self.mainWindowView.updateStatus("准备录制 \(sourcesText)…")
             self.startTimer()
             
-            // 启动底层录制
-            self.audioRecorderController.setRecordingMode(self.currentRecordingMode)
+            // 设置音频格式
             self.audioRecorderController.setAudioFormat(self.currentFormat)
-            self.audioRecorderController.startRecording()
+            
+            // 使用新的多音源录制方法
+            self.audioRecorderController.startMultiSourceRecording(
+                wantMic: wantMic,
+                wantSystem: wantSystemMixdown,
+                wantProcess: wantSpecificProcess,
+                targetPID: self.selectedPIDs.first
+            )
             
             // 视觉上进入录制态
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {

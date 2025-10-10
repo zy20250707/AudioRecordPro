@@ -183,15 +183,13 @@ class AudioCallbackHandler {
     // MARK: - Private Methods
     
     func calculateAndReportLevel(from bufferList: AudioBufferList, frameCount: UInt32) {
-        guard let onLevel = onLevel else { 
-            logger.debug("AudioCallbackHandler: 没有电平回调函数")
-            return 
-        }
+        guard let onLevel = onLevel else { return }
         
         // 使用统一的工具类计算电平
-        let (maxLevel, rmsLevel, normalizedLevel) = AudioUtils.calculateAudioLevel(from: bufferList, frameCount: frameCount)
+        let (_, _, normalizedLevel) = AudioUtils.calculateAudioLevel(from: bufferList, frameCount: frameCount)
         
-        logger.debug("AudioCallbackHandler: 电平计算 - maxLevel: \(maxLevel), rmsLevel: \(rmsLevel), normalized: \(normalizedLevel)")
+        // 只在电平有意义时输出日志（减少冗余）
+        // logger.debug("AudioCallbackHandler: 电平 \(normalizedLevel)")
         
         DispatchQueue.main.async {
             onLevel(normalizedLevel)
@@ -199,16 +197,13 @@ class AudioCallbackHandler {
     }
     
      func writeAudioData(from bufferList: AudioBufferList, frameCount: UInt32) {
-        guard frameCount > 0 else { 
-            logger.debug("AudioCallbackHandler: 跳过写入 - frameCount: \(frameCount)")
-            return 
-        }
+        guard frameCount > 0 else { return }
         
         // 优先使用 AudioToolbox 文件管理器
         if let audioToolboxManager = audioToolboxFileManager {
             do {
                 try audioToolboxManager.writeAudioData(bufferList, frameCount: frameCount)
-                logger.debug("AudioCallbackHandler: 使用 AudioToolbox 成功写入 \(frameCount) 帧音频数据")
+                // 成功写入，不再输出每次的日志（减少冗余）
                 return
             } catch {
                 logger.error("AudioCallbackHandler: AudioToolbox 写入失败: \(error.localizedDescription)")
@@ -217,10 +212,7 @@ class AudioCallbackHandler {
         }
         
         // 回退到 AVAudioFile（保持向后兼容）
-        guard let audioFile = audioFile else { 
-            logger.debug("AudioCallbackHandler: 跳过写入 - 没有可用的文件管理器")
-            return 
-        }
+        guard let audioFile = audioFile else { return }
         
         logger.debug("AudioCallbackHandler: 使用 AVAudioFile 准备写入 \(frameCount) 帧音频数据")
         

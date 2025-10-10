@@ -42,7 +42,7 @@ class FileManagerUtils {
     /// 生成新的录音文件名（应用名称+时间日期格式）
     func generateRecordingFileName(recordingMode: AudioUtils.RecordingMode, appName: String? = nil, format: String) -> String {
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        dateFormatter.dateFormat = "yyyyMMdd-HHmmss"  // 更简洁的格式：20250110-153000
         let timestamp = dateFormatter.string(from: Date())
         
         let sourceName: String
@@ -50,7 +50,7 @@ class FileManagerUtils {
         case .microphone:
             sourceName = "麦克风"
         case .systemMixdown:
-            sourceName = "系统音频输出"
+            sourceName = "系统音频"
         case .specificProcess:
             if let appName = appName, !appName.isEmpty {
                 sourceName = appName

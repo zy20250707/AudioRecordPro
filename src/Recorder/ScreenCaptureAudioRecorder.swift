@@ -322,10 +322,7 @@ class MinimalVideoStreamOutput: NSObject, SCStreamOutput {
     
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         // Minimal processing, only to drive audio stream
-        if type == .screen {
-            // Don't process video data, just log receipt
-            logger.info("📺 收到视频数据，帧数: \(CMSampleBufferGetNumSamples(sampleBuffer))")
-        }
+        // 视频数据不需要处理，不输出日志（减少冗余）
     }
 }
 
@@ -358,23 +355,13 @@ class SystemAudioStreamOutput: NSObject, SCStreamOutput {
     }
     
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        logger.info("🎵 SystemAudioStreamOutput收到数据，类型: \(type)")
-        
         guard sampleBuffer.isValid else { return }
-        guard type == .audio else { 
-            logger.info("忽略非音频数据，类型: \(type)")
-            return 
-        }
+        guard type == .audio else { return }
         
         // Mark that audio data has been received
         audioDataReceived = true
         
-        // Add detailed audio data debug info
-        let frameCount = CMSampleBufferGetNumSamples(sampleBuffer)
-        let duration = CMTimeGetSeconds(CMSampleBufferGetDuration(sampleBuffer))
-        logger.info("🎵 音频样本缓冲区 - 帧数: \(frameCount), 时长: \(duration)秒")
-        
-        logger.info("🎵 处理音频样本缓冲区，帧数: \(CMSampleBufferGetNumSamples(sampleBuffer))")
+        // 不再输出每次音频样本的日志（减少冗余）
         
         // Process audio sample buffer
         guard let audioFile = audioFile else { 
@@ -390,12 +377,7 @@ class SystemAudioStreamOutput: NSObject, SCStreamOutput {
                 // Calculate level
                 let level = calculateRMSLevel(from: audioBuffer)
                 
-                // Add debug info
-                if level > 0.01 { // Only print when there's significant level
-                    logger.info("系统音频录制电平: \(String(format: "%.3f", level)), 帧数: \(audioBuffer.frameLength)")
-                }
-                
-                // Update level display in real-time
+                // Update level display in real-time (不再输出日志)
                 DispatchQueue.main.async {
                     self.onLevel?(level)
                 }

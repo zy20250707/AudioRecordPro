@@ -180,16 +180,13 @@ class MicrophoneRecorder: BaseAudioRecorder {
             // Calculate and update level
             let level = self.calculateRMSLevel(from: buffer)
             
-            // Add debug info
-            if level > 0.005 {
-                self.logger.info("麦克风录制电平: \(String(format: "%.4f", level)), 帧数: \(buffer.frameLength), rate=\(buffer.format.sampleRate), ch=\(buffer.format.channelCount)")
-            }
+            // 不再输出每次的电平日志（减少冗余）
             
-            // 统计日志：每秒打印一次累计帧数
+            // 统计日志：每10秒打印一次累计帧数
             let now = CFAbsoluteTimeGetCurrent()
-            if now - self.lastStatsLogTime > 1.0 {
+            if now - self.lastStatsLogTime > 10.0 {
                 self.lastStatsLogTime = now
-                self.logger.info("累计写入帧数: \(self.totalFramesWritten)")
+                logger.info("📊 麦克风录制统计: 累计写入 \(self.totalFramesWritten) 帧")
             }
             Task { @MainActor in self.onLevel?(level) }
         }
