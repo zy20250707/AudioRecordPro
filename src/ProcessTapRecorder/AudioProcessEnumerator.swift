@@ -68,13 +68,6 @@ class AudioProcessEnumerator {
                 continue 
             }
             
-            // 排除当前应用自己
-            let currentPID = ProcessInfo.processInfo.processIdentifier
-            if pid == currentPID {
-                logger.debug("🚫 跳过当前应用: PID=\(pid)")
-                continue
-            }
-            
             let (name, path) = readNameAndPath(for: pid)
             
             // 跳过被过滤的进程
@@ -243,6 +236,18 @@ class AudioProcessEnumerator {
             return true
         }
         
+        // 过滤自己（当前应用）
+        if pid == getpid() {
+            logger.debug("🚫 过滤当前应用: name=\(name), pid=\(pid)")
+            return true
+        }
+        
+        // 过滤自己的应用名称
+        if name == "audio_record_mac" || path.contains("audio_record_mac") {
+            logger.debug("🚫 过滤当前应用: name=\(name), path=\(path)")
+            return true
+        }
+        
         let systemPaths = [
             "/System/Library/",
             "/usr/libexec/",
@@ -293,7 +298,7 @@ class AudioProcessEnumerator {
             return false
         }
 
-        // 常见关键字过滤（但排除主进程和 Chrome 音频服务进程）
+        // 常见关键字过滤（但排除主进程、Chrome 音频服务进程）
         let keywords = [" helper", "renderer", "gpu", "webhelper", "plugin", "(renderer)"]
         if keywords.contains(where: { n.contains($0) }) { 
             // 特殊处理：如果是 Chrome 音频服务进程，不过滤
@@ -301,12 +306,12 @@ class AudioProcessEnumerator {
                 logger.debug("✅ 关键字过滤中保留 Chrome 音频服务进程: name=\(name), path=\(path)")
                 return false
             }
-            // WeChatAppEx Helper/Plugin 等辅助进程应该被过滤
-            logger.debug("🧹 过滤辅助进程: name=\(name)")
+            // 微信扩展的 Helper 也应该被过滤
+            logger.debug("🚫 过滤 Helper/Plugin 进程: name=\(name)")
             return true 
         }
         if keywords.contains(where: { b.contains($0) }) { 
-            logger.debug("🧹 过滤辅助进程(Bundle): bundle=\(bundleID)")
+            logger.debug("🚫 过滤 Helper/Plugin 进程: bundle=\(bundleID)")
             return true 
         }
 
@@ -317,7 +322,7 @@ class AudioProcessEnumerator {
                 logger.debug("✅ 路径过滤中保留 Chrome 音频服务进程: name=\(name), path=\(path)")
                 return false
             }
-            logger.debug("🧹 过滤 Helper 路径进程: path=\(path)")
+            logger.debug("🚫 过滤 Helper 路径: path=\(path)")
             return true 
         }
 
@@ -346,8 +351,13 @@ class AudioProcessEnumerator {
             return true
         }
         
+        // 使用系统 API 判断是否为 Dock App（.regular activationPolicy）
         if let running = NSRunningApplication(processIdentifier: pid) {
-            return running.activationPolicy == .regular
+            let isRegular = running.activationPolicy == .regular
+            if isRegular {
+                logger.debug("✅ isDockApp: 通过 activationPolicy 判断为 Dock App: \(path)")
+            }
+            return isRegular
         }
         
         let bundleURL = URL(fileURLWithPath: path)

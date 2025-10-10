@@ -374,10 +374,10 @@ class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate, TabContai
             
             for process in processes {
                 if !process.path.isEmpty && self.iconCache[process.path] == nil {
-                    let icon = NSWorkspace.shared.icon(forFile: process.path)
+                    // 使用改进的 loadAppIcon 方法，支持 Helper 进程图标映射
+                    let icon = self.loadAppIcon(for: process.path)
                     // 调整图标大小以优化性能
                     icon.size = NSSize(width: 24, height: 24)
-        icon.size = NSSize(width: 24, height: 24)
                     
                     DispatchQueue.main.async {
                         self.iconCache[process.path] = icon
@@ -405,21 +405,33 @@ class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate, TabContai
     
     /// 加载应用图标，支持多种方式
     private func loadAppIcon(for path: String) -> NSImage {
-        // 方法1: 直接从 .app bundle 路径加载
-        if path.hasSuffix(".app") {
-            let icon = NSWorkspace.shared.icon(forFile: path)
+        // 特殊处理: 各种浏览器 Helper 进程使用主应用图标
+        if let mainAppPath = getMainAppPathForHelper(path: path) {
+            let icon = NSWorkspace.shared.icon(forFile: mainAppPath)
             if icon.size.width > 0 && icon.size.height > 0 {
-                logger.debug("✅ 从 .app bundle 加载图标成功: \(path)")
+                logger.debug("✅ Helper 进程使用主应用图标: \(mainAppPath)")
                 return icon
             }
         }
         
-        // 方法2: 尝试从可执行文件路径向上查找 .app bundle
-        let bundlePath = findAppBundlePath(from: path)
+        // 方法1: 直接从 .app bundle 路径加载
+        if path.hasSuffix(".app") {
+            let icon = NSWorkspace.shared.icon(forFile: path)
+            // 检查是否成功加载了真实的应用图标（不是默认文件图标）
+            if icon.representations.count > 1 || (icon.size.width > 16 && icon.size.height > 16) {
+                logger.debug("✅ 从 .app bundle 加载图标成功: \(path)")
+                return icon
+            } else {
+                logger.debug("⚠️ 从 .app bundle 加载的是默认图标，尝试其他方法: \(path)")
+            }
+        }
+        
+        // 方法2: 尝试从可执行文件路径向上查找主 .app bundle（跳过 Helpers）
+        let bundlePath = findMainAppBundlePath(from: path)
         if bundlePath != path {
             let icon = NSWorkspace.shared.icon(forFile: bundlePath)
             if icon.size.width > 0 && icon.size.height > 0 {
-                logger.debug("✅ 从转换的 bundle 路径加载图标成功: \(bundlePath)")
+                logger.debug("✅ 从主应用 bundle 路径加载图标成功: \(bundlePath)")
                 return icon
             }
         }
@@ -453,10 +465,75 @@ class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate, TabContai
         return executablePath
     }
     
+    /// 从可执行文件路径查找主应用 .app bundle 路径（跳过 Helpers/Frameworks）
+    private func findMainAppBundlePath(from executablePath: String) -> String {
+        let url = URL(fileURLWithPath: executablePath)
+        var currentURL = url
+        var foundApp: URL?
+        
+        while currentURL.path != "/" {
+            if currentURL.pathExtension == "app" {
+                foundApp = currentURL
+                // 如果路径包含 Helpers 或 Frameworks，继续向上查找主应用
+                if currentURL.path.contains("/Helpers/") || 
+                   currentURL.path.contains("/Frameworks/") ||
+                   currentURL.lastPathComponent.contains("Helper") {
+                    currentURL = currentURL.deletingLastPathComponent()
+                    continue
+                }
+                // 找到主应用
+                return currentURL.path
+            }
+            currentURL = currentURL.deletingLastPathComponent()
+        }
+        
+        // 如果没有找到主应用，返回找到的第一个.app，或原始路径
+        return foundApp?.path ?? executablePath
+    }
+    
     /// 从路径获取 Bundle ID（简化版本）
     private func getBundleID(from path: String) -> String? {
         // 这里可以扩展更复杂的 Bundle ID 获取逻辑
         // 目前返回 nil，让系统使用默认图标
+        return nil
+    }
+    
+    /// 获取 Helper 进程对应的主应用路径
+    private func getMainAppPathForHelper(path: String) -> String? {
+        let lowerPath = path.lowercased()
+        
+        // Chrome 主应用或 Helper -> Chrome 主应用
+        if lowerPath.contains("google chrome") {
+            let chromeAppPath = "/Applications/Google Chrome.app"
+            if FileManager.default.fileExists(atPath: chromeAppPath) {
+                return chromeAppPath
+            }
+        }
+        
+        // Edge Helper -> Edge 主应用
+        if lowerPath.contains("microsoft edge helper") || lowerPath.contains("microsoft edge framework") {
+            let edgeAppPath = "/Applications/Microsoft Edge.app"
+            if FileManager.default.fileExists(atPath: edgeAppPath) {
+                return edgeAppPath
+            }
+        }
+        
+        // Firefox Helper -> Firefox 主应用
+        if lowerPath.contains("firefox") && lowerPath.contains("helper") {
+            let firefoxAppPath = "/Applications/Firefox.app"
+            if FileManager.default.fileExists(atPath: firefoxAppPath) {
+                return firefoxAppPath
+            }
+        }
+        
+        // Safari Helper -> Safari 主应用
+        if lowerPath.contains("safari") && lowerPath.contains("helper") {
+            let safariAppPath = "/System/Applications/Safari.app"
+            if FileManager.default.fileExists(atPath: safariAppPath) {
+                return safariAppPath
+            }
+        }
+        
         return nil
     }
     
