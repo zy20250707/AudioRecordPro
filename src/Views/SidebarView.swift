@@ -298,6 +298,11 @@ class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate, TabContai
         return selectedProcesses
     }
     
+    /// 获取指定进程的应用图标
+    func getIconForProcess(_ process: AudioProcessInfo) -> NSImage {
+        return getCachedIcon(for: process.path)
+    }
+    
     // MARK: - NSTableViewDataSource
     func numberOfRows(in tableView: NSTableView) -> Int {
         return availableProcesses.count

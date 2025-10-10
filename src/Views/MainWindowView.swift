@@ -133,11 +133,25 @@ class MainWindowView: NSView {
     }
     
     func updateTracksDisplay() {
-        let tracks = TracksView.createTracksFromSelection(
-            systemSelected: sidebarView.isSystemAudioSourceSelected(),
-            microphoneSelected: sidebarView.isMicrophoneSourceSelected(),
-            selectedProcesses: sidebarView.getSelectedProcesses()
-        )
+        var tracks: [TrackInfo] = []
+        
+        // 系统音频
+        if sidebarView.isSystemAudioSourceSelected() {
+            tracks.append(TrackInfo(icon: "🔊", title: "系统音频输出", isActive: true))
+        }
+        
+        // 麦克风
+        if sidebarView.isMicrophoneSourceSelected() {
+            tracks.append(TrackInfo(icon: "🎤", title: "麦克风", isActive: true))
+        }
+        
+        // 进程 - 使用应用图标
+        let selectedProcesses = sidebarView.getSelectedProcesses()
+        for process in selectedProcesses {
+            let appIcon = sidebarView.getIconForProcess(process)
+            tracks.append(TrackInfo(icon: "", title: process.name, isActive: true, appIcon: appIcon))
+        }
+        
         tracksView.updateTracks(tracks)
     }
     

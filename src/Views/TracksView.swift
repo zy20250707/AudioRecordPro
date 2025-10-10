@@ -3,9 +3,17 @@ import Foundation
 
 // MARK: - TrackInfo
 struct TrackInfo {
-    let icon: String
+    let icon: String  // Emoji 图标（用于系统音频、麦克风）
+    let appIcon: NSImage?  // 应用图标（用于进程）
     let title: String
     let isActive: Bool
+    
+    init(icon: String, title: String, isActive: Bool, appIcon: NSImage? = nil) {
+        self.icon = icon
+        self.title = title
+        self.isActive = isActive
+        self.appIcon = appIcon
+    }
 }
 
 // MARK: - Delegate Protocol
@@ -97,13 +105,32 @@ class TracksView: NSView {
         // 顶部头部区域（图标 + 标题）
         let headerView = NSView()
         headerView.translatesAutoresizingMaskIntoConstraints = false
-        let iconLabel = NSTextField()
-        iconLabel.stringValue = track.icon
-        iconLabel.isBordered = false
-        iconLabel.isEditable = false
-        iconLabel.backgroundColor = .clear
-        iconLabel.font = NSFont.systemFont(ofSize: 24)
-        iconLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        // 图标：优先使用应用图标，否则使用 Emoji
+        let iconView: NSView
+        if let appIcon = track.appIcon {
+            // 使用应用图标（NSImageView）
+            let imageView = NSImageView()
+            imageView.image = appIcon
+            imageView.imageScaling = .scaleProportionallyUpOrDown
+            imageView.translatesAutoresizingMaskIntoConstraints = false
+            iconView = imageView
+            NSLayoutConstraint.activate([
+                imageView.widthAnchor.constraint(equalToConstant: 24),
+                imageView.heightAnchor.constraint(equalToConstant: 24)
+            ])
+        } else {
+            // 使用 Emoji 图标（NSTextField）
+            let iconLabel = NSTextField()
+            iconLabel.stringValue = track.icon
+            iconLabel.isBordered = false
+            iconLabel.isEditable = false
+            iconLabel.backgroundColor = .clear
+            iconLabel.font = NSFont.systemFont(ofSize: 24)
+            iconLabel.translatesAutoresizingMaskIntoConstraints = false
+            iconView = iconLabel
+        }
+        
         let titleLabel = NSTextField()
         titleLabel.stringValue = track.title
         titleLabel.isBordered = false
@@ -112,7 +139,7 @@ class TracksView: NSView {
         titleLabel.font = NSFont.systemFont(ofSize: 18)
         titleLabel.textColor = .labelColor
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        headerView.addSubview(iconLabel)
+        headerView.addSubview(iconView)
         headerView.addSubview(titleLabel)
 
         // 电平表在下方占满宽度
@@ -131,10 +158,10 @@ class TracksView: NSView {
             headerView.trailingAnchor.constraint(lessThanOrEqualTo: trackView.trailingAnchor, constant: -16),
             headerView.heightAnchor.constraint(equalToConstant: 28),
 
-            iconLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor),
-            iconLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            iconView.leadingAnchor.constraint(equalTo: headerView.leadingAnchor),
+            iconView.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
             
-            titleLabel.leadingAnchor.constraint(equalTo: iconLabel.trailingAnchor, constant: 12),
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
             titleLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: headerView.trailingAnchor),
 
