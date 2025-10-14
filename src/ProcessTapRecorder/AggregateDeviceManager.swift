@@ -122,7 +122,7 @@ class AggregateDeviceManager {
         if autoStartStatus == noErr {
             logger.info("✅ AggregateDeviceManager: Process Tap自动启动已启用")
         } else {
-            logger.warning("⚠️ AggregateDeviceManager: Process Tap自动启动设置失败: \(autoStartStatus)")
+            logger.debug("💡 AggregateDeviceManager: Process Tap自动启动不可用 (错误: 'who?'/\(autoStartStatus))，将使用手动启动")
         }
         
         return true

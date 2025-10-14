@@ -205,6 +205,11 @@ extension MainWindowView: SidebarViewDelegate {
         // 导出为MP3格式
         delegate?.mainWindowViewDidRequestExportToMP3(self, file: file)
     }
+    
+    func sidebarViewDidChangeMixAudio(_ view: SidebarView, enabled: Bool) {
+        // 混音状态变化，传递给主控制器
+        delegate?.mainWindowViewDidChangeMixAudio(self, enabled: enabled)
+    }
 }
 
 // MARK: - TracksViewDelegate
@@ -238,4 +243,5 @@ protocol MainWindowViewDelegate: AnyObject {
     func mainWindowViewDidSelectProcesses(_ view: MainWindowView, pids: [pid_t])
     func mainWindowViewDidRequestProcessRefresh(_ view: MainWindowView)
     func mainWindowViewDidRequestExportToMP3(_ view: MainWindowView, file: RecordedFileInfo)
+    func mainWindowViewDidChangeMixAudio(_ view: MainWindowView, enabled: Bool)
 }

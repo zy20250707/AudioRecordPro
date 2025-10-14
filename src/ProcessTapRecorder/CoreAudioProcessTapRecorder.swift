@@ -58,14 +58,10 @@ final class CoreAudioProcessTapRecorder: BaseAudioRecorder {
     
     /// 获取目标应用名称
     private func getTargetAppName() -> String? {
-        if let pid = targetPID {
-            // 通过PID查找应用名称
-            let processes = processEnumerator.getAvailableAudioProcesses()
-            if let process = processes.first(where: { $0.pid == pid }) {
-                return process.name
-            }
-        }
-        return nil
+        guard let pid = targetPID else { return nil }
+        
+        let processes = processEnumerator.getAvailableAudioProcesses()
+        return processes.first(where: { $0.pid == pid })?.name
     }
     
     /// 使用Swift CoreAudio API进行录制（实验性）

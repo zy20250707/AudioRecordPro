@@ -73,15 +73,24 @@ class AudioRecorderController: NSObject {
     ///   - wantSystem: 是否录制系统音频
     ///   - wantProcess: 是否录制特定进程
     ///   - targetPID: 特定进程的PID
+    ///   - mixAudio: 是否混音录制（系统音频+麦克风混合到一个文件）
     func startMultiSourceRecording(
         wantMic: Bool,
         wantSystem: Bool,
         wantProcess: Bool,
-        targetPID: pid_t? = nil
+        targetPID: pid_t? = nil,
+        mixAudio: Bool = false
     ) {
         guard !isRunning else {
             logger.warning("录制已在进行中")
             onStatus?("录制已在进行中")
+            return
+        }
+        
+        // 如果启用混音模式（新UI：包含麦克风声音选项）
+        if mixAudio && (wantSystem || wantProcess) {
+            logger.info("启动混音录制模式 (系统音频 + 麦克风)")
+            startMixedRecording(wantSystem: wantSystem, wantProcess: wantProcess, targetPID: targetPID)
             return
         }
         
@@ -217,6 +226,35 @@ class AudioRecorderController: NSObject {
     }
     
     // MARK: - Private Methods
+    
+    /// 启动混音录制（系统音频 + 麦克风混合到一个文件）
+    private func startMixedRecording(wantSystem: Bool, wantProcess: Bool, targetPID: pid_t?) {
+        if #available(macOS 14.4, *) {
+            logger.info("创建混音录制器")
+            let mixedRecorder = MixedAudioRecorder(mode: wantProcess ? .specificProcess : .systemMixdown)
+            
+            // 设置目标PID
+            if let pid = targetPID {
+                mixedRecorder.setTargetPID(pid)
+                logger.info("设置进程混音录制，PID: \(pid)")
+            } else {
+                logger.info("设置系统混音录制（混音模式）")
+            }
+            
+            mixedRecorder.setAudioFormat(_currentFormat)
+            setupRecorderCallbacks(mixedRecorder, sourceType: .systemAudio)
+            
+            activeRecorders[.systemAudio] = mixedRecorder
+            
+            logger.info("启动混音录制器")
+            mixedRecorder.startRecording()
+            
+            onStatus?("正在混音录制 (系统音频 + 麦克风)")
+        } else {
+            logger.warning("混音录制需要 macOS 14.4+")
+            onStatus?("混音录制需要 macOS 14.4+")
+        }
+    }
     
     private func setupRecorderCallbacks(_ recorder: AudioRecorderProtocol, sourceType: AudioSourceType) {
         recorder.onLevel = { [weak self] lvl in

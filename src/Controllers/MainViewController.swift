@@ -29,6 +29,9 @@ class MainViewController: NSViewController {
     private var selectedProcesses: Set<AudioProcessInfo> = []
     private var selectedPIDs: [pid_t] = []
     
+    // 混音设置
+    private var shouldMixAudio: Bool = false
+    
     // MARK: - Lifecycle
     override func loadView() {
         mainWindowView = MainWindowView()
@@ -261,7 +264,7 @@ class MainViewController: NSViewController {
         // 根据左侧选择动态确定录制源
         let wantMic = mainWindowView.isMicrophoneSourceSelected()
         let wantSystemMixdown = mainWindowView.isSystemAudioSourceSelected()
-        let wantSpecificProcess = !selectedPIDs.isEmpty
+        let wantSpecificProcess = !selectedPIDs.isEmpty  // 多进程支持
         
         // 检查是否有任何选择
         guard wantMic || wantSystemMixdown || wantSpecificProcess else {
@@ -269,13 +272,20 @@ class MainViewController: NSViewController {
             return
         }
         
-        logger.info("开始多音源录制 - 麦克风:\(wantMic), 系统:\(wantSystemMixdown), 进程:\(wantSpecificProcess)")
+        // 根据UI逻辑调整：如果启用混音，则自动包含麦克风（不需要单独录制麦克风轨道）
+        let actualWantMic = shouldMixAudio ? false : wantMic  // 混音模式下不需要单独的麦克风轨道
+        
+        logger.info("开始多音源录制 - 麦克风:\(actualWantMic), 系统:\(wantSystemMixdown), 进程:\(wantSpecificProcess), 混音:\(shouldMixAudio)")
         
         // 构建录制源描述
         var sources: [String] = []
-        if wantMic { sources.append("麦克风") }
-        if wantSystemMixdown { sources.append("系统音频") }
-        if wantSpecificProcess { sources.append("特定进程") }
+        if shouldMixAudio && (wantSystemMixdown || wantSpecificProcess) {
+            sources.append("系统音频+麦克风混音")
+        } else {
+            if actualWantMic { sources.append("麦克风") }
+            if wantSystemMixdown { sources.append("系统音频") }
+            if wantSpecificProcess { sources.append("特定进程") }
+        }
         let sourcesText = sources.joined(separator: " + ")
         
         checkPermissionsBeforeRecording { [weak self] granted in
@@ -293,6 +303,14 @@ class MainViewController: NSViewController {
                 }
             }
             
+            // 如果启用混音，提前请求麦克风权限，避免启动时卡顿
+            if self.shouldMixAudio {
+                PermissionManager.shared.requestMicrophonePermission { status in
+                    // 权限请求完成后继续
+                    self.logger.info("混音模式：麦克风权限状态 - \(status)")
+                }
+            }
+            
             self.isRecording = true
             self.recordingStartTime = Date()
             self.mainWindowView.updateRecordingState(.preparing)
@@ -304,10 +322,11 @@ class MainViewController: NSViewController {
             
             // 使用新的多音源录制方法
             self.audioRecorderController.startMultiSourceRecording(
-                wantMic: wantMic,
+                wantMic: actualWantMic,  // 使用调整后的麦克风设置
                 wantSystem: wantSystemMixdown,
                 wantProcess: wantSpecificProcess,
-                targetPID: self.selectedPIDs.first
+                targetPID: self.selectedPIDs.first,  // 恢复单进程
+                mixAudio: self.shouldMixAudio  // 传入混音设置
             )
             
             // 视觉上进入录制态
@@ -733,6 +752,34 @@ extension MainViewController: MainWindowViewDelegate {
     
     func mainWindowViewDidRequestExportToMP3(_ view: MainWindowView, file: RecordedFileInfo) {
         exportToMP3(file: file)
+    }
+    
+    func mainWindowViewDidChangeMixAudio(_ view: MainWindowView, enabled: Bool) {
+        shouldMixAudio = enabled
+        logger.info("混音设置已更改: \(enabled)")
+        
+        if enabled {
+            mainWindowView.updateStatus("已启用混音录制 (系统音频 + 麦克风混合)")
+            
+            // 立即请求麦克风权限，避免录制时卡顿
+            logger.info("预先请求麦克风权限...")
+            PermissionManager.shared.requestMicrophonePermission { [weak self] status in
+                DispatchQueue.main.async {
+                    switch status {
+                    case .granted:
+                        self?.logger.info("麦克风权限已授予")
+                        self?.mainWindowView.updateStatus("麦克风权限就绪，可以开始录制")
+                    case .denied, .restricted:
+                        self?.logger.warning("麦克风权限被拒绝")
+                        self?.mainWindowView.updateStatus("麦克风权限被拒绝，混音录制可能无法使用")
+                    case .notDetermined:
+                        self?.logger.info("麦克风权限未确定")
+                    }
+                }
+            }
+        } else {
+            mainWindowView.updateStatus("已禁用混音，将分别录制")
+        }
     }
     
     private func refreshProcessList() {

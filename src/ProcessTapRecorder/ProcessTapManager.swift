@@ -124,10 +124,11 @@ class ProcessTapManager {
             self.uuid = realTapUID
             logger.info("✅ 获取到Tap真实UID: \(realTapUID)")
         } else {
-            logger.error("❌ 无法获取Tap真实UID: \(uidStatus)")
+            // 'who?' (0x77686F3F) 表示属性不可用，这是正常的
+            logger.debug("⚠️ 无法获取Tap真实UID (错误码: \(uidStatus)/'who?')，使用生成的UUID")
             // 作为后备方案，使用生成的UUID
             self.uuid = uuid.uuidString as CFString
-            logger.warning("⚠️ 使用生成的UUID作为后备: \(uuid.uuidString)")
+            logger.info("✅ 使用生成的UUID: \(uuid.uuidString)")
         }
         
         // Process Tap创建成功，等待聚合设备激活

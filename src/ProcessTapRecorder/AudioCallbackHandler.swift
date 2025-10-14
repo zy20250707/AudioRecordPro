@@ -93,6 +93,9 @@ class AudioCallbackHandler {
     private var audioToolboxFileManager: AudioToolboxFileManager?
     private var onLevel: ((Float) -> Void)?
     
+    // 自定义回调（用于混音录制）
+    private var customCallback: ((UnsafePointer<AudioBufferList>, UInt32) -> Void)?
+    
     // MARK: - Initialization
     
     init() {}
@@ -113,6 +116,12 @@ class AudioCallbackHandler {
     /// 设置电平回调
     func setLevelCallback(_ callback: @escaping (Float) -> Void) {
         self.onLevel = callback
+    }
+    
+    /// 设置自定义回调（用于混音录制）
+    func setCustomCallback(_ callback: @escaping (UnsafePointer<AudioBufferList>, UInt32) -> Void) {
+        self.customCallback = callback
+        logger.info("🎵 AudioCallbackHandler: 设置自定义回调（混音模式）")
     }
     
     /// 创建音频回调函数
@@ -183,7 +192,11 @@ class AudioCallbackHandler {
     // MARK: - Private Methods
     
     func calculateAndReportLevel(from bufferList: AudioBufferList, frameCount: UInt32) {
-        guard let onLevel = onLevel else { return }
+        guard let onLevel = onLevel else { 
+            // 如果没有设置电平回调，记录警告
+            // logger.debug("⚠️ AudioCallbackHandler: 电平回调未设置")
+            return 
+        }
         
         // 使用统一的工具类计算电平
         let (_, _, normalizedLevel) = AudioUtils.calculateAudioLevel(from: bufferList, frameCount: frameCount)
@@ -198,6 +211,14 @@ class AudioCallbackHandler {
     
      func writeAudioData(from bufferList: AudioBufferList, frameCount: UInt32) {
         guard frameCount > 0 else { return }
+        
+        // 如果设置了自定义回调（混音模式），则调用自定义回调
+        if let customCallback = customCallback {
+            withUnsafePointer(to: bufferList) { bufferListPointer in
+                customCallback(bufferListPointer, frameCount)
+            }
+            return
+        }
         
         // 优先使用 AudioToolbox 文件管理器
         if let audioToolboxManager = audioToolboxFileManager {

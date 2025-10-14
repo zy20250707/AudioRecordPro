@@ -48,6 +48,7 @@ swiftc \
   "$STAGE_DIR/src/Views/WaveformView.swift" \
   "$STAGE_DIR/src/Recorder/AudioRecorderProtocol.swift" \
   "$STAGE_DIR/src/Recorder/MicrophoneRecorder.swift" \
+  "$STAGE_DIR/src/Recorder/MixedAudioRecorder.swift" \
   "$STAGE_DIR/src/Recorder/ScreenCaptureAudioRecorder.swift" \
   "$STAGE_DIR/src/Controllers/AudioRecorderController.swift" \
   "$STAGE_DIR/src/Controllers/MainViewController.swift" \
