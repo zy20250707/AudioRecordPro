@@ -22,11 +22,11 @@ class MixedAudioRecorder: BaseAudioRecorder {
     
     // 音频格式
     private var commonFormat: AudioStreamBasicDescription?
-    private let targetSampleRate: Double = 48000.0  // 统一采样率
+    private var targetSampleRate: Double = 48000.0  // 采样率（动态检测）
     
     // 混音缓冲区 - 使用环形缓冲区存储麦克风数据
     private var micRingBuffer: [Float] = []
-    private let maxRingBufferSize = 48000 * 2 * 2  // 2秒的缓冲区，立体声
+    private var maxRingBufferSize = 192000  // 2秒的缓冲区（48000 * 2声道 * 2秒），会根据实际采样率调整
     private var micWritePosition = 0
     private var micReadPosition = 0
     private let bufferLock = NSLock()
@@ -122,7 +122,11 @@ class MixedAudioRecorder: BaseAudioRecorder {
     // MARK: - Private Methods - Setup
     
     private func setupCommonAudioFormat() throws {
-        // 使用统一的高质量音频格式
+        // 动态检测当前音频设备的采样率
+        let detectedSampleRate = AudioUtils.getCurrentAudioDeviceSampleRate()
+        targetSampleRate = detectedSampleRate
+        
+        // 使用检测到的采样率创建音频格式
         commonFormat = AudioStreamBasicDescription(
             mSampleRate: targetSampleRate,
             mFormatID: kAudioFormatLinearPCM,
@@ -135,7 +139,7 @@ class MixedAudioRecorder: BaseAudioRecorder {
             mReserved: 0
         )
         
-        logger.info("📊 音频格式设置: \(targetSampleRate)Hz, 32-bit Float, 立体声")
+        logger.info("📊 音频格式设置: \(targetSampleRate)Hz（动态检测）, 32-bit Float, 立体声")
     }
     
     private func createOutputFile() throws {
@@ -248,7 +252,10 @@ class MixedAudioRecorder: BaseAudioRecorder {
         
         // 直接连接到主混音器
         micEngine.connect(inputNode, to: micEngine.mainMixerNode, format: inputFormat)
-        logger.info("⏱️ 连接麦克风到主混音器完成，耗时: \(String(format: "%.2f", Date().timeIntervalSince(startTime)))秒")
+        
+        // 关闭输出音量，避免回音（用户不需要听到自己的声音）
+        micEngine.mainMixerNode.outputVolume = 0.0
+        logger.info("⏱️ 连接麦克风到主混音器完成，已静音输出，耗时: \(String(format: "%.2f", Date().timeIntervalSince(startTime)))秒")
         
         // 关键：在inputNode上安装tap获取数据
         let bufferSize: AVAudioFrameCount = 4096
@@ -342,10 +349,12 @@ class MixedAudioRecorder: BaseAudioRecorder {
         bufferLock.lock()
         defer { bufferLock.unlock() }
         
-        // 确保缓冲区已初始化
+        // 确保缓冲区已初始化（根据实际采样率调整大小）
         if micRingBuffer.isEmpty {
+            // 根据实际采样率计算缓冲区大小：2秒的数据
+            maxRingBufferSize = Int(targetSampleRate) * 2 * 2  // 采样率 * 2声道 * 2秒
             micRingBuffer = [Float](repeating: 0, count: maxRingBufferSize)
-            logger.info("🎤 环形缓冲区已初始化，大小: \(maxRingBufferSize)")
+            logger.info("🎤 环形缓冲区已初始化，大小: \(maxRingBufferSize)（基于\(targetSampleRate)Hz采样率）")
         }
         
         // 将麦克风数据写入环形缓冲区
