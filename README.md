@@ -1,15 +1,17 @@
 # AudioRecordMac
 
-一个功能强大的 macOS 音频录制应用程序，支持麦克风录制和系统音频录制两种模式，基于 Swift 和 AppKit 开发。
+一个功能强大的 macOS 音频录制应用程序，支持麦克风录制、系统音频录制和**创新的融合录音**功能，基于 Swift 和 AppKit 开发。
 
 ## ✨ 主要功能
 
 - 🎤 **麦克风录制** - 录制外部音频输入
 - 🔊 **系统音频录制** - 录制应用程序音频输出（支持指定进程）
+- ✨ **融合录音 (NEW!)** - 系统音频与麦克风实时混音到单文件
 - 📊 **实时电平显示** - 专业的音频电平监控界面
 - 🎵 **多种音频格式** - 支持 WAV (PCM) 和 M4A (AAC) 格式
-- 🔧 **高质量音频** - 44.1kHz / 32-bit Float 高精度录制
+- 🔧 **高质量音频** - 动态采样率适配 / 32-bit Float 高精度录制
 - 🎯 **进程选择** - 可录制特定应用程序的音频输出
+- 🎚️ **智能混音** - 60% 系统音频 + 40% 麦克风，防削波处理
 
 ## 🖼️ 应用界面
 
@@ -33,16 +35,30 @@ open build/AudioRecordMac.app
 ## 📱 使用指南
 
 ### 麦克风录制
-1. 选择"麦克风"模式
+1. 勾选"麦克风"
 2. 授予麦克风权限
 3. 点击"开始录制"按钮
 4. 实时查看电平显示
 
 ### 系统音频录制
-1. 选择"系统音频"模式
+1. 勾选"系统音频输出"
 2. 授予屏幕录制权限
 3. 可选择特定应用程序进行录制
 4. 点击"开始录制"按钮
+
+### 融合录音（系统音频 + 麦克风混音）⭐️ 新功能
+1. 勾选"系统音频输出"
+2. 勾选"↳ 包含麦克风声音"
+3. （可选）点击选择特定应用，或不选择录制系统混音
+4. 点击"开始录制"
+5. 同时播放音频和对着麦克风说话
+6. 停止后生成混音文件：`mixed_app+mic_timestamp.wav`
+
+**适用场景**：
+- 💼 在线会议录制 - 完整记录所有人的声音
+- 🎮 游戏直播 - 游戏音效 + 主播解说
+- 🎵 音乐教学 - 音乐播放 + 老师讲解
+- 📹 视频制作 - 高质量音频素材
 
 ## 🏗️ 技术架构
 
@@ -89,15 +105,37 @@ Process Tap -> Aggregate Device -> Audio Callback -> File
 ```
 
 **关键参数:**
-- 采样率: 44.1kHz (CD 标准)
+- 采样率: 动态检测 (24kHz/44.1kHz/48kHz)
 - 位深: 32-bit Float (高精度)
 - 声道数: 2 (立体声)
 - 格式: Linear PCM Float
 
 **支持功能:**
 - 单进程录制
-- 多进程混音录制
 - 系统全局混音录制
+
+#### 3. 融合录音 (MixedAudioRecorder) ⭐️ NEW
+```swift
+// 混音流程
+Process Tap (系统音频) + AVAudioEngine (麦克风)
+    ↓
+环形缓冲区同步
+    ↓
+实时混音 (60% + 40%)
+    ↓
+混音文件 (单文件输出)
+```
+
+**关键技术:**
+- 环形缓冲区: 2秒缓冲，异步音频流同步
+- 双Tap机制: 保持AVAudioEngine持续运行
+- 动态采样率: 自动适配设备采样率
+- 混音比例: 60% 系统音频 + 40% 麦克风
+- 防削波: 限幅处理保证音质
+
+**文件命名:**
+- 系统混音: `mixed_system+mic_timestamp.wav`
+- 单进程: `mixed_appname+mic_timestamp.wav`
 
 ### 音频格式配置
 
@@ -130,9 +168,11 @@ AudioStreamBasicDescription(
 - `AudioRecorderController` - 音频录制控制器（工厂模式）
 - `CoreAudioProcessTapRecorder` - 系统音频录制器
 - `MicrophoneRecorder` - 麦克风录制器
+- `MixedAudioRecorder` - 融合录音器（系统音频+麦克风混音）⭐️
 - `LevelMeterView` - 专业电平表视图
 - `ProcessTapManager` - Process Tap 管理器
 - `AudioToolboxFileManager` - 音频文件管理器
+- `AudioCallbackHandler` - 音频回调处理器
 
 ### 工具类
 - `AudioUtils` - 音频工具类（格式转换、电平计算）
@@ -163,8 +203,10 @@ let normalizedLevel = min(1.0, rms * sensitivityMultiplier)
 ```
 
 ### 文件命名规则
-- 麦克风录制: `microphone_YYYY-MM-DD_HH-mm-ss.wav`
-- 系统音频: `system_AppName_YYYY-MM-DD_HH-mm-ss.wav`
+- 麦克风录制: `microphone_YYYYMMdd-HHmmss.wav`
+- 系统音频: `system_YYYYMMdd-HHmmss.wav`
+- 单进程: `appname_YYYYMMdd-HHmmss.wav`
+- 融合录音: `mixed_appname+mic_YYYYMMdd-HHmmss.wav` ⭐️
 
 ### 支持的格式
 - **WAV (PCM)**: 无损质量，适合后期处理
@@ -208,10 +250,27 @@ A: 检查权限设置，确保已授予麦克风或屏幕录制权限。
 A: 确保系统版本为 macOS 14.4+，并检查目标应用程序是否正在播放音频。
 
 **Q: 音频文件音调异常？**
-A: 应用使用 44.1kHz 采样率，确保播放器支持该采样率。
+A: 应用会自动检测设备采样率，无需手动调整。如遇问题请重启应用。
+
+**Q: 融合录音时麦克风没声音？**
+A: 
+- 确保勾选了"包含麦克风声音"选项
+- 检查系统声音设置中的输入设备
+- AirPods Pro 可能有兼容问题，建议使用内置麦克风
+- 确保对着麦克风说话时有音频输入
+
+**Q: 录制时听到回音？**
+A: 这是已修复的问题。如仍有回音，请更新到最新版本。
 
 ### 调试信息
-应用提供详细的日志输出，可通过控制台查看录制过程的详细信息。
+应用提供详细的日志输出，位于：
+```
+~/Library/Containers/com.voidzhang.audio-record-mac/Data/Documents/AudioRecordings/Logs/
+```
+
+### 已知问题
+- **AirPods Pro 输入限制**: 作为输入设备时可能录制数据量较少，建议使用 MacBook 内置麦克风
+- **'who?' 错误**: CoreAudio Process Tap 的某些属性不可用是正常现象，已有完善的后备方案
 
 ## 📄 许可证
 
