@@ -133,6 +133,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 设置窗口属性
         window.title = "音频录制工具"
         window.isRestorable = false
+        
+        // 全屏时保持标题栏和红绿灯按钮始终可见（类似 Chrome 的行为）
+        // 使用 fullScreenAuxiliary 而不是 fullScreenPrimary，这样可以自定义全屏行为
+        window.collectionBehavior = [.fullScreenPrimary, .fullScreenAllowsTiling]
+        
+        // 创建一个空的工具栏，这样全屏时标题栏区域会保持可见
+        let toolbar = NSToolbar(identifier: "MainToolbar")
+        toolbar.displayMode = .iconOnly
+        toolbar.showsBaselineSeparator = false
+        window.toolbar = toolbar
+        
+        if #available(macOS 11.0, *) {
+            // 使用 expanded 样式，全屏时工具栏区域会保持可见
+            window.toolbarStyle = .expanded
+        }
+        
+        window.titleVisibility = .visible
+        window.titlebarAppearsTransparent = false
         // 移除自动保存名称，强制使用新尺寸
         // window.setFrameAutosaveName("MainWindow")
         

@@ -1,0 +1,219 @@
+# AudioRecordMac 项目规则
+
+## 项目简介
+
+这是一个 **macOS 音频录制应用 + SDK**，使用纯 Swift 开发，提供专业级的音频录制功能，支持多种调用方式。
+
+### 核心功能
+- ✅ 麦克风录制 - 高质量麦克风音频录制
+- ✅ 系统音频录制 - 录制系统音频输出
+- ✅ 混音录制 - 麦克风 + 系统音频实时混音
+- ✅ 特定进程录制 - 录制指定应用的音频
+- ✅ 音频处理 - 回声消除、噪音抑制
+
+### SDK 支持场景
+- **Chromium** (C++) - 通过 C API 调用
+- **Electron** (Node.js) - 通过 N-API Addon 调用
+- **Swift/OC 应用** - 通过 Swift API 调用
+
+## 技术栈
+
+- **语言**：Swift（核心实现 + API 层）
+- **UI 框架**：AppKit（原生 macOS）
+- **音频框架**：
+  - AVFoundation - 麦克风录制
+  - CoreAudio - 底层音频处理
+  - AudioToolbox - 音频文件写入
+  - ScreenCaptureKit - 屏幕/音频捕获
+- **SDK 导出**：
+  - Swift API - 原生 macOS 应用
+  - C API (@_cdecl) - Chromium/跨语言
+  - N-API Addon - Electron/Node.js
+- **最低系统要求**：macOS 13.0
+- **混音功能要求**：macOS 14.4+（使用 Process Tap API）
+
+## 构建方式
+
+```bash
+# 构建应用
+./build.sh
+
+# 运行应用
+open build/AudioRecordMac.app
+
+# 构建 SDK Framework（待实现）
+./scripts/build_framework.sh
+
+# 构建 N-API Addon（待实现）
+./scripts/build_napi.sh
+```
+
+不使用 Xcode 项目，直接通过 `swiftc` 编译。
+
+## SDK 架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      调用方层                                │
+├─────────────────┬─────────────────┬─────────────────────────┤
+│  Swift 应用     │   Chromium      │      Electron           │
+│  Swift API      │    C API        │    N-API Addon          │
+└────────┬────────┴────────┬────────┴────────────┬────────────┘
+         │                 │                     │
+         └─────────────────┼─────────────────────┘
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    C API 导出层                              │
+│        AudioRecordSDK.h + AudioRecordSDK_C.swift            │
+└─────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  Swift 核心实现层                            │
+│   MicrophoneRecorder / MixedAudioRecorder / ProcessTap      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## 目录结构
+
+```
+audio_record_mac/
+├── src/                           # 源代码目录
+│   ├── main.swift                # 应用入口
+│   ├── AudioRecordSDK/           # SDK API 层
+│   │   ├── AudioRecordAPI.swift  # Swift API
+│   │   ├── AudioConstraints.swift
+│   │   ├── MediaStream.swift
+│   │   ├── MediaStreamTrack.swift
+│   │   └── AudioRecordSDK.swift  # 统一导出
+│   ├── Controllers/              # 应用控制器
+│   │   ├── AppDelegate.swift
+│   │   ├── MainViewController.swift
+│   │   └── AudioRecorderController.swift
+│   ├── Views/                    # UI 视图组件
+│   │   ├── MainWindowView.swift
+│   │   ├── ControlPanelView.swift
+│   │   ├── LevelMeterView.swift
+│   │   └── WaveformView.swift
+│   ├── Recorder/                 # 录制器实现
+│   │   ├── AudioRecorderProtocol.swift
+│   │   ├── MicrophoneRecorder.swift
+│   │   ├── MixedAudioRecorder.swift
+│   │   └── ScreenCaptureAudioRecorder.swift
+│   ├── ProcessTapRecorder/       # CoreAudio 进程音频录制
+│   │   ├── CoreAudioProcessTapRecorder.swift
+│   │   ├── ProcessTapManager.swift
+│   │   ├── SwiftProcessTapManager.swift
+│   │   ├── AggregateDeviceManager.swift
+│   │   ├── AudioCallbackHandler.swift
+│   │   ├── AudioToolboxFileManager.swift
+│   │   └── AudioProcessEnumerator.swift
+│   ├── Models/                   # 数据模型
+│   │   └── AudioRecording.swift
+│   └── Utils/                    # 工具类
+│       ├── Logger.swift
+│       ├── PermissionManager.swift
+│       ├── FileManagerUtils.swift
+│       ├── AudioUtils.swift
+│       └── LevelMonitor.swift
+├── assets/                       # 资源文件
+├── scripts/                      # 辅助脚本
+├── build.sh                      # 构建脚本
+├── Info.plist                    # 应用配置
+└── AudioRecordMac.entitlements   # 权限声明
+```
+
+## 核心架构
+
+### 录制模式
+```swift
+enum RecordingMode {
+    case microphone      // 纯麦克风
+    case specificProcess // 特定进程
+    case systemMixdown   // 系统混音
+    case mixed           // 麦克风 + 系统音频
+}
+```
+
+### 录制器类
+- `MicrophoneRecorder` - AVAudioEngine 麦克风录制
+- `MixedAudioRecorder` - 麦克风 + 系统音频混音
+- `CoreAudioProcessTapRecorder` - CoreAudio Process Tap 系统音频
+
+### SDK API 设计
+
+#### Swift API（类 Web MediaStream）
+```swift
+let stream = try await AudioAPI.shared.getUserMedia(constraints: constraints)
+try AudioAPI.shared.startRecording(stream: stream)
+AudioAPI.shared.stopRecording()
+```
+
+#### C API（跨语言调用）
+```c
+AudioRecordHandle handle = AudioRecord_Create();
+AudioRecord_Start(handle, AudioRecordMode_Mixed);
+AudioRecord_SetCompleteCallback(handle, callback, userData);
+AudioRecord_Stop(handle);
+AudioRecord_Destroy(handle);
+```
+
+## 编码规范
+
+- 使用**中文注释**
+- 遵循 Swift 命名规范（驼峰命名）
+- 异步代码使用 `async/await`
+- UI 操作标记 `@MainActor`
+- 错误处理使用 `throws` 和自定义 `Error` 类型
+- 日志使用 `Logger` 工具类
+- C API 导出使用 `@_cdecl` 标记
+
+## 注意事项
+
+### 权限要求
+- 麦克风权限（NSMicrophoneUsageDescription）
+- 屏幕录制权限（用于系统音频）
+
+### 系统版本
+- 基础功能：macOS 13.0+
+- Process Tap 功能：macOS 14.4+（使用 `@available` 标记）
+
+### 线程安全
+- C API 内部使用 `DispatchQueue.main.async` 确保主线程执行
+- 音频数据处理使用 `NSLock` 保护环形缓冲区
+
+### 构建注意
+- 修改代码后需重新运行 `./build.sh`
+- 签名使用 ad-hoc 或 entitlements
+
+## 相关文档
+
+文档统一存放在 `docs/` 目录下：
+
+- `docs/SDK架构设计.md` - SDK 架构设计文档 ⭐
+- `docs/MVP音频API设计.md` - API 设计文档
+- `docs/项目能力分析.md` - 项目能力分析
+- `docs/音频媒体流设计.md` - MediaStream 设计方案
+- `docs/CoreAudio重构总结.md` - CoreAudio 重构记录
+- `docs/MVP兼容API设计.md` - 兼容 Web API 设计
+- `docs/MVP极简版与标准版对比.md` - MVP 功能对比
+- `docs/MVP_Swift_API设计.md` - Swift API 设计
+- `src/AudioRecordSDK/README.md` - SDK 使用文档
+- `src/AudioRecordSDK/USAGE_GUIDE.md` - SDK 使用指南
+
+## SDK 开发路线图
+
+### Phase 1: C API 层 ⏳
+- [ ] 创建 `AudioRecordSDK.h` 头文件
+- [ ] 实现 `AudioRecordSDK_C.swift` (@_cdecl 导出)
+- [ ] 构建脚本生成 `.framework`
+
+### Phase 2: N-API Addon
+- [ ] 创建 `audio_record_addon.cc`
+- [ ] 配置 `binding.gyp`
+- [ ] 预编译 arm64/x86_64
+
+### Phase 3: 集成测试
+- [ ] Chromium 集成测试
+- [ ] Electron 集成测试
+- [ ] 文档完善
